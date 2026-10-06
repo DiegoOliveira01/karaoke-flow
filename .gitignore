@@ -1,5 +1,25 @@
-backend/target/
-backend/data/
+# Python virtual environments
 separator-service/.venv/
-separator-service/scratch/
+separator-service/.venv-rocm/
+
+# Python cache
 __pycache__/
+*.py[cod]
+
+# Separator temporary files
+separator-service/scratch/
+
+# Downloaded ML models
+separator-service/models/*.ckpt
+separator-service/models/*.yaml
+
+# Generated application data
+backend/data/
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
