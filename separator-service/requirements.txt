@@ -1,0 +1,6 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+# Instale o audio-separator conforme a sua GPU (veja o README):
+#   Linux + AMD (ROCm): primeiro instale o torch com ROCm, depois  pip install audio-separator
+#   CPU:                pip install "audio-separator[cpu]"
+audio-separator

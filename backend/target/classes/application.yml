@@ -1,0 +1,14 @@
+server:
+  port: 8080
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 200MB
+
+karaoke:
+  storage-dir: ./data/songs
+  separator:
+    url: http://localhost:8001
+    read-timeout: 3h   # separar uma música pode demorar bastante sem GPU

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karaokê</title>
+<style>
+  :root {
+    --stage: #1c1230;
+    --panel: #2a1c46;
+    --panel-2: #36255a;
+    --ink: #f5efff;
+    --muted: #b3a5d3;
+    --hot: #ff4d8d;      /* voz do cantor */
+    --cool: #55c1ff;     /* backing vocals */
+    --soft: #9d8cff;     /* instrumental */
+    --ok: #62e3a4;
+    --warn: #ffc857;
+    --bad: #ff7a7a;
+    --radius: 14px;
+    --display: "Futura", "Century Gothic", "Avenir Next", "Trebuchet MS", system-ui, sans-serif;
+    --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--stage);
+    color: var(--ink);
+    font: 16px/1.5 var(--body);
+  }
+  h1, h2, h3 { font-family: var(--display); margin: 0; letter-spacing: 0.01em; }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
+
+  .app {
+    display: grid;
+    grid-template-columns: minmax(280px, 380px) 1fr;
+    gap: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+    min-height: 100%;
+  }
+  @media (max-width: 800px) { .app { grid-template-columns: 1fr; padding: 16px; } }
+
+  /* ---------- biblioteca ---------- */
+  .library { display: flex; flex-direction: column; gap: 16px; }
+  .library h1 { font-size: 2rem; }
+  .card { background: var(--panel); border-radius: var(--radius); padding: 16px; }
+
+  .add-form { display: grid; gap: 10px; }
+  .add-form h2 { font-size: 1.1rem; }
+  .add-form input[type=text] {
+    width: 100%; padding: 10px 12px; border-radius: 10px; border: 2px solid transparent;
+    background: var(--stage);
+  }
+  .add-form input[type=text]:focus { border-color: var(--soft); outline: none; }
+  .add-form input[type=file] { color: var(--muted); }
+  .btn {
+    border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 700;
+    background: var(--hot); color: #26001a;
+  }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn.ghost { background: transparent; color: var(--muted); border: 2px solid var(--panel-2); font-weight: 600; }
+
+  .songs { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .song { background: var(--panel); border-radius: var(--radius); padding: 12px 14px; display: grid; gap: 6px;
+          border-left: 6px solid var(--panel-2); }
+  .song[data-status=READY] { border-left-color: var(--ok); }
+  .song[data-status=SEPARATING] { border-left-color: var(--warn); }
+  .song[data-status=FAILED] { border-left-color: var(--bad); }
+  .song.active { background: var(--panel-2); }
+  .song-title { font-weight: 700; }
+  .song-meta { color: var(--muted); font-size: .9rem; }
+  .song-actions { display: flex; gap: 8px; margin-top: 4px; }
+  .song-actions .btn { padding: 6px 12px; font-size: .9rem; }
+  .empty { color: var(--muted); padding: 8px 2px; }
+
+  /* ---------- player ---------- */
+  .player { background: var(--panel); border-radius: 22px; padding: 28px; display: flex; flex-direction: column; gap: 24px;
+            align-self: start; position: sticky; top: 24px; }
+  @media (max-width: 800px) { .player { position: static; padding: 20px; } }
+  .now h2 { font-size: clamp(1.8rem, 4vw, 3rem); line-height: 1.1; overflow-wrap: anywhere; }
+  .now p { margin: 6px 0 0; color: var(--muted); }
+
+  .transport { display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: center; }
+  .play {
+    width: 64px; height: 64px; border-radius: 50%; border: 0; background: var(--hot); color: #26001a;
+    font-size: 1.6rem; display: grid; place-items: center;
+  }
+  .play:disabled { opacity: .4; cursor: not-allowed; }
+  .time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 4.5ch; }
+
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; background: transparent; height: 32px; margin: 0; }
+  input[type=range]::-webkit-slider-runnable-track { height: 8px; border-radius: 99px; background: var(--c-track, var(--stage)); }
+  input[type=range]::-moz-range-track { height: 8px; border-radius: 99px; background: var(--c-track, var(--stage)); }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 26px; height: 26px; border-radius: 50%; margin-top: -9px;
+    background: var(--c, var(--ink)); border: 3px solid var(--panel);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 20px; height: 20px; border-radius: 50%; background: var(--c, var(--ink)); border: 3px solid var(--panel);
+  }
+
+  .mixer { display: grid; gap: 18px; }
+  .presets { display: flex; gap: 10px; flex-wrap: wrap; }
+  .presets .btn { flex: 1; min-width: 140px; }
+  .presets .btn.on { outline: 3px solid var(--ink); }
+
+  .fader { display: grid; gap: 4px; }
+  .fader label { display: flex; justify-content: space-between; font-weight: 600; }
+  .fader output { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 400; }
+  .fader .hint { color: var(--muted); font-size: .85rem; margin: 0; }
+  /* a voz do cantor é o controle que mais se mexe: ganha mais corpo */
+  .fader.lead { --c: var(--hot); padding: 16px; border-radius: var(--radius); background: var(--stage); }
+  .fader.lead label { font-family: var(--display); font-size: 1.25rem; }
+  .fader.lead input[type=range] { height: 48px; }
+  .fader.lead input[type=range]::-webkit-slider-runnable-track { height: 14px; }
+  .fader.lead input[type=range]::-moz-range-track { height: 14px; }
+  .fader.lead input[type=range]::-webkit-slider-thumb { width: 38px; height: 38px; margin-top: -12px; }
+  .fader.lead input[type=range]::-moz-range-thumb { width: 32px; height: 32px; }
+  .fader.backing { --c: var(--cool); }
+  .fader.instr { --c: var(--soft); }
+
+  .status { min-height: 1.5em; color: var(--muted); }
+  .status.error { color: var(--bad); }
+
+  .placeholder { color: var(--muted); }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .btn, .play { transition: transform .08s ease; }
+    .btn:active:not(:disabled), .play:active:not(:disabled) { transform: scale(.96); }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===== biblioteca ===== -->
+  <section class="library" aria-label="Músicas">
+    <h1>Karaokê</h1>
+
+    <form class="card add-form" id="add-form">
+      <h2>Adicionar música</h2>
+      <input type="text" name="title" placeholder="Título (opcional)" autocomplete="off">
+      <input type="text" name="artist" placeholder="Artista (opcional)" autocomplete="off">
+      <input type="file" name="file" accept="audio/*" required>
+      <button class="btn" type="submit" id="add-btn">Separar vozes</button>
+      <div class="status" id="add-status" role="status"></div>
+    </form>
+
+    <ul class="songs" id="songs"></ul>
+  </section>
+
+  <!-- ===== player ===== -->
+  <section class="player" aria-label="Player">
+    <div class="now">
+      <h2 id="now-title">Escolha uma música</h2>
+      <p id="now-artist">Quando a separação terminar, clique em “Cantar”.</p>
+    </div>
+
+    <div class="transport">
+      <button class="play" id="play" disabled aria-label="Tocar">▶</button>
+      <input type="range" id="seek" min="0" max="0" step="0.1" value="0" disabled aria-label="Posição da música"
+             style="--c: var(--ink);">
+      <span class="time" id="time">0:00</span>
+    </div>
+
+    <div class="mixer" id="mixer" hidden>
+      <div class="presets">
+        <button class="btn" id="preset-karaoke" type="button">Karaokê (sem a voz do cantor)</button>
+        <button class="btn ghost" id="preset-original" type="button">Original</button>
+      </div>
+
+      <div class="fader lead">
+        <label for="vol-lead">Voz do cantor <output id="out-lead">100%</output></label>
+        <input type="range" id="vol-lead" min="0" max="100" value="100">
+      </div>
+      <div class="fader backing">
+        <label for="vol-backing">Backing vocals <output id="out-backing">100%</output></label>
+        <input type="range" id="vol-backing" min="0" max="100" value="100">
+        <p class="hint">Em algumas músicas fica melhor zerar. Teste.</p>
+      </div>
+      <div class="fader instr">
+        <label for="vol-instr">Instrumental <output id="out-instr">100%</output></label>
+        <input type="range" id="vol-instr" min="0" max="100" value="100">
+      </div>
+    </div>
+
+    <div class="status" id="player-status" role="status"></div>
+  </section>
+</div>
+
+<script>
+"use strict";
+
+const API = "/api/songs";
+const STATUS_LABEL = {
+  QUEUED: "Na fila",
+  SEPARATING: "Separando as vozes…",
+  READY: "Pronta",
+  FAILED: "Falhou",
+};
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  node.append(...children);
+  return node;
+};
+
+/* ============================================================
+   Biblioteca
+   ============================================================ */
+let songs = [];
+let pollTimer = null;
+let currentId = null;
+
+async function refresh() {
+  try {
+    const res = await fetch(API);
+    songs = await res.json();
+  } catch (e) {
+    // backend fora do ar: tenta de novo em alguns segundos
+  }
+  renderSongs();
+  const pending = songs.some((s) => s.status === "QUEUED" || s.status === "SEPARATING");
+  clearTimeout(pollTimer);
+  if (pending) pollTimer = setTimeout(refresh, 3000);
+}
+
+function renderSongs() {
+  const list = $("songs");
+  list.replaceChildren();
+  if (songs.length === 0) {
+    list.append(el("li", { className: "empty" }, "Nenhuma música ainda. Envie um arquivo de áudio acima."));
+    return;
+  }
+  for (const s of songs) {
+    const meta = [s.artist, STATUS_LABEL[s.status]].filter(Boolean).join(" • ");
+    const li = el("li", { className: "song" + (s.id === currentId ? " active" : "") });
+    li.dataset.status = s.status;
+    li.append(el("div", { className: "song-title" }, s.title));
+    li.append(el("div", { className: "song-meta" }, meta));
+    if (s.status === "FAILED" && s.error) {
+      li.append(el("div", { className: "song-meta", style: "color: var(--bad)" }, s.error));
+    }
+    const actions = el("div", { className: "song-actions" });
+    if (s.status === "READY") {
+      actions.append(el("button", { className: "btn", type: "button", onclick: () => loadSong(s) }, "Cantar"));
+    }
+    actions.append(el("button", { className: "btn ghost", type: "button", onclick: () => removeSong(s) }, "Apagar"));
+    li.append(actions);
+    list.append(li);
+  }
+}
+
+async function removeSong(s) {
+  if (!confirm(`Apagar “${s.title}”?`)) return;
+  if (s.id === currentId) unloadSong();
+  await fetch(`${API}/${s.id}`, { method: "DELETE" });
+  refresh();
+}
+
+$("add-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const form = ev.currentTarget;
+  const status = $("add-status");
+  $("add-btn").disabled = true;
+  status.className = "status";
+  status.textContent = "Enviando…";
+  try {
+    const res = await fetch(API, { method: "POST", body: new FormData(form) });
+    if (!res.ok) throw new Error("O servidor recusou o arquivo.");
+    form.reset();
+    status.textContent = "Enviada. A separação começa assim que chegar a vez dela.";
+    refresh();
+  } catch (e) {
+    status.className = "status error";
+    status.textContent = e.message || "Não foi possível enviar.";
+  } finally {
+    $("add-btn").disabled = false;
+  }
+});
+
+/* ============================================================
+   Player (Web Audio: um nó de volume por stem)
+   ============================================================ */
+const STEMS = ["instrumental", "lead", "backing"];
+const audio = {
+  ctx: null,
+  buffers: {},
+  gains: {},
+  sources: [],
+  duration: 0,
+  offset: 0,      // posição (s) quando está pausado
+  startedAt: 0,   // ctx.currentTime - posição, quando está tocando
+  playing: false,
+  raf: 0,
+};
+
+const sliders = {
+  lead: { input: $("vol-lead"), out: $("out-lead") },
+  backing: { input: $("vol-backing"), out: $("out-backing") },
+  instrumental: { input: $("vol-instr"), out: $("out-instr") },
+};
+
+function setPlayerStatus(msg, isError = false) {
+  const n = $("player-status");
+  n.textContent = msg;
+  n.className = "status" + (isError ? " error" : "");
+}
+
+function fmt(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+
+function position() {
+  return audio.playing ? audio.ctx.currentTime - audio.startedAt : audio.offset;
+}
+
+function stopSources() {
+  for (const src of audio.sources) {
+    src.onended = null;
+    try { src.stop(); } catch (_) { /* já parou */ }
+    src.disconnect();
+  }
+  audio.sources = [];
+}
+
+function unloadSong() {
+  stopSources();
+  cancelAnimationFrame(audio.raf);
+  audio.playing = false;
+  audio.offset = 0;
+  audio.buffers = {};
+  currentId = null;
+  $("now-title").textContent = "Escolha uma música";
+  $("now-artist").textContent = "Quando a separação terminar, clique em “Cantar”.";
+  $("mixer").hidden = true;
+  $("play").disabled = true;
+  $("play").textContent = "▶";
+  $("seek").disabled = true;
+  $("seek").value = 0;
+  $("time").textContent = "0:00";
+  setPlayerStatus("");
+  renderSongs();
+}
+
+async function loadSong(song) {
+  stopSources();
+  cancelAnimationFrame(audio.raf);
+  audio.playing = false;
+  audio.offset = 0;
+  currentId = song.id;
+  renderSongs();
+
+  $("now-title").textContent = song.title;
+  $("now-artist").textContent = song.artist || "";
+  $("play").disabled = true;
+  $("seek").disabled = true;
+  $("mixer").hidden = true;
+  setPlayerStatus("Carregando as faixas…");
+
+  // O AudioContext precisa nascer de um clique do usuário (política dos navegadores).
+  if (!audio.ctx) {
+    audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  const ctx = audio.ctx;
+
+  try {
+    const decoded = await Promise.all(
+      STEMS.map(async (name) => {
+        const file = song.files[name];
+        if (!file) throw new Error(`Faixa “${name}” não encontrada.`);
+        const res = await fetch(`/media/${song.id}/${file}`);
+        if (!res.ok) throw new Error(`Não consegui baixar a faixa “${name}”.`);
+        return [name, await ctx.decodeAudioData(await res.arrayBuffer())];
+      })
+    );
+    if (currentId !== song.id) return; // o usuário trocou de música enquanto carregava
+
+    audio.buffers = Object.fromEntries(decoded);
+    audio.duration = Math.max(...decoded.map(([, b]) => b.duration));
+
+    audio.gains = {};
+    for (const name of STEMS) {
+      const g = ctx.createGain();
+      g.connect(ctx.destination);
+      audio.gains[name] = g;
+      applySlider(name);
+    }
+
+    $("seek").max = audio.duration;
+    $("seek").value = 0;
+    $("seek").disabled = false;
+    $("play").disabled = false;
+    $("mixer").hidden = false;
+    $("time").textContent = fmt(0);
+    setPlayerStatus("");
+    setPreset("karaoke"); // começa no modo karaokê: é pra isso que o app existe
+  } catch (e) {
+    setPlayerStatus(e.message || "Erro ao carregar a música.", true);
+  }
+}
+
+function startPlayback(from) {
+  const ctx = audio.ctx;
+  stopSources();
+  const when = ctx.currentTime + 0.1; // todas as faixas começam no mesmo instante
+  for (const name of STEMS) {
+    const src = ctx.createBufferSource();
+    src.buffer = audio.buffers[name];
+    src.connect(audio.gains[name]);
+    src.start(when, from);
+    audio.sources.push(src);
+  }
+  audio.sources[0].onended = onEnded;
+  audio.startedAt = when - from;
+  audio.playing = true;
+  $("play").textContent = "❚❚";
+  $("play").setAttribute("aria-label", "Pausar");
+  tick();
+}
+
+function pausePlayback() {
+  audio.offset = position();
+  stopSources();
+  audio.playing = false;
+  cancelAnimationFrame(audio.raf);
+  $("play").textContent = "▶";
+  $("play").setAttribute("aria-label", "Tocar");
+}
+
+function onEnded() {
+  // só chega aqui se a faixa terminou sozinha (stop() manual zera o onended)
+  audio.playing = false;
+  audio.offset = 0;
+  stopSources();
+  cancelAnimationFrame(audio.raf);
+  $("play").textContent = "▶";
+  $("seek").value = 0;
+  $("time").textContent = fmt(0);
+}
+
+function tick() {
+  if (!audio.playing) return;
+  const pos = Math.min(position(), audio.duration);
+  if (!seeking) $("seek").value = pos;
+  $("time").textContent = fmt(pos);
+  audio.raf = requestAnimationFrame(tick);
+}
+
+$("play").addEventListener("click", async () => {
+  if (!audio.ctx || !audio.buffers.lead) return;
+  await audio.ctx.resume();
+  if (audio.playing) pausePlayback();
+  else startPlayback(audio.offset);
+});
+
+let seeking = false;
+$("seek").addEventListener("input", (e) => {
+  seeking = true;
+  $("time").textContent = fmt(Number(e.target.value));
+});
+$("seek").addEventListener("change", (e) => {
+  seeking = false;
+  const to = Number(e.target.value);
+  audio.offset = to;
+  if (audio.playing) startPlayback(to);
+});
+
+/* ---------- mixer ---------- */
+function applySlider(name) {
+  const { input, out } = sliders[name];
+  const v = Number(input.value) / 100;
+  out.textContent = `${input.value}%`;
+  if (audio.gains[name]) audio.gains[name].gain.value = v;
+}
+for (const name of Object.keys(sliders)) {
+  sliders[name].input.addEventListener("input", () => {
+    applySlider(name);
+    markPreset(null);
+  });
+}
+
+function markPreset(which) {
+  $("preset-karaoke").classList.toggle("on", which === "karaoke");
+  $("preset-original").classList.toggle("on", which === "original");
+}
+function setPreset(which) {
+  sliders.lead.input.value = which === "karaoke" ? 0 : 100;
+  sliders.backing.input.value = 100;
+  sliders.instrumental.input.value = 100;
+  for (const name of Object.keys(sliders)) applySlider(name);
+  markPreset(which);
+}
+$("preset-karaoke").addEventListener("click", () => setPreset("karaoke"));
+$("preset-original").addEventListener("click", () => setPreset("original"));
+
+refresh();
+</script>
+</body>
+</html>
