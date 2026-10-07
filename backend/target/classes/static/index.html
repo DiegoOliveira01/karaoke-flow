@@ -64,6 +64,30 @@
   <ul class="results" id="lyrics-results"></ul>
 </dialog>
 
+<!-- ===== diálogo: palavras sincronizadas ===== -->
+<dialog id="dlg-words" aria-labelledby="dlg-words-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-words-title">Palavras sincronizadas</h2>
+    <button class="btn ghost" aria-label="Fechar">Fechar</button>
+  </form>
+  <p>Marca o tempo de cada palavra usando a voz isolada do cantor e a letra sincronizada. Na tela de karaokê,
+    cada palavra é preenchida no momento em que é cantada.</p>
+  <label class="field">Idioma da letra
+    <select id="words-lang">
+      <option value="pt">Português</option>
+      <option value="en">English</option>
+      <option value="es">Español</option>
+      <option value="fr">Français</option>
+      <option value="it">Italiano</option>
+      <option value="de">Deutsch</option>
+    </select>
+  </label>
+  <p class="hint">Roda uma vez por letra, na GPU, e pode levar alguns minutos. Enquanto isso (ou se alguma linha não
+    der certo) a tela usa o preenchimento estimado por linha. Trocar a letra descarta as palavras.</p>
+  <div class="status" id="words-status" role="status"></div>
+  <button class="btn" id="words-go" type="button">Sincronizar palavras</button>
+</dialog>
+
 <!-- ===== diálogo: escolher capa ===== -->
 <dialog id="dlg-cover" aria-labelledby="dlg-cover-title">
   <form method="dialog" class="dlg-head">
@@ -102,6 +126,9 @@
       Feche esta tela e use o botão “Letra” na biblioteca.
     </p>
   </main>
+
+  <!-- contagem regressiva antes de a voz entrar (depois de pausas e da introdução) -->
+  <div class="countdown" id="countdown" hidden aria-hidden="true"><span id="countdown-num"></span></div>
 
   <footer class="stage-bottom stage-chrome">
     <button class="play small" id="st-play" type="button" aria-label="Tocar">▶</button>

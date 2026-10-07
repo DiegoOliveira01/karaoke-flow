@@ -108,6 +108,22 @@ public class SongController {
         return service.attachCover(id, image.bytes(), image.extension()).orElseThrow(SongController::notFound);
     }
 
+    /** Pede o alinhamento palavra a palavra. Roda em segundo plano; acompanhe por wordsState. */
+    @PostMapping("/{id}/words")
+    public ResponseEntity<Song> requestWords(
+            @PathVariable String id,
+            @RequestParam(value = "language", defaultValue = "pt") String language) {
+        if (!language.matches("[a-z]{2,3}")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Idioma inválido");
+        }
+        try {
+            Song song = service.requestWords(id, language).orElseThrow(SongController::notFound);
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(song);
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
     @PutMapping("/{id}/lyrics-offset")
     public Song setLyricsOffset(@PathVariable String id, @RequestBody OffsetBody body) {
         return service.setLyricsOffset(id, body.offsetMs()).orElseThrow(SongController::notFound);

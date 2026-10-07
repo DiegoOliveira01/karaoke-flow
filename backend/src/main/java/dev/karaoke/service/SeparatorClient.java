@@ -46,4 +46,23 @@ public class SeparatorClient {
                 .body(new ParameterizedTypeReference<Map<String, String>>() {
                 });
     }
+
+    /**
+     * Alinha a letra (LRC) com a voz isolada e grava o words.json em output.
+     * Bloqueia até terminar.
+     */
+    public void align(Path audio, Path lrc, Path output, String language) {
+        Map<String, String> body = Map.of(
+                "audio_path", audio.toAbsolutePath().toString(),
+                "lrc_path", lrc.toAbsolutePath().toString(),
+                "output_path", output.toAbsolutePath().toString(),
+                "language", language);
+
+        client.post()
+                .uri("/align")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .retrieve()
+                .toBodilessEntity();
+    }
 }

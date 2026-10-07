@@ -85,7 +85,7 @@ async function refresh() {
     else syncCurrent(fresh);
   }
   clearTimeout(pollTimer);
-  if (songs.some((s) => s.status === "QUEUED" || s.status === "SEPARATING")) {
+  if (songs.some((s) => s.status === "QUEUED" || s.status === "SEPARATING" || s.wordsState === "RUNNING")) {
     pollTimer = setTimeout(refresh, 3000);
   }
 }
@@ -118,13 +118,19 @@ function renderSongs() {
 
     const meta = [s.artist, STATUS_LABEL[s.status]].filter(Boolean).join(" • ");
     const hasLyrics = !!(s.files && s.files.lyrics);
+    const hasWords = !!(s.files && s.files.words);
+    const wordsLabel = s.wordsState === "RUNNING" ? "palavras…" : hasWords ? "palavras ✓" : "sem palavras";
     const info = el("div", {},
       el("div", { className: "song-title" }, s.title),
       el("div", { className: "song-meta" }, meta),
       el("div", { className: "tags" },
         el("span", { className: "tag" + (hasLyrics ? " ok" : "") }, hasLyrics ? "letra ✓" : "sem letra"),
-        el("span", { className: "tag" + (cover ? " ok" : "") }, cover ? "capa ✓" : "sem capa")));
+        el("span", { className: "tag" + (cover ? " ok" : "") }, cover ? "capa ✓" : "sem capa"),
+        hasLyrics ? el("span", { className: "tag" + (hasWords ? " ok" : "") }, wordsLabel) : ""));
     if (s.status === "FAILED" && s.error) info.append(el("div", { className: "song-error" }, s.error));
+    if (s.wordsState === "FAILED" && s.wordsError) {
+      info.append(el("div", { className: "song-error" }, `Palavras: ${s.wordsError}`));
+    }
 
     const actions = el("div", { className: "song-actions" });
     if (s.status === "READY") {
@@ -132,6 +138,9 @@ function renderSongs() {
     }
     actions.append(
       el("button", { className: "btn ghost", type: "button", onclick: () => openLyricsDialog(s) }, "Letra"),
+      s.status === "READY" && hasLyrics
+        ? el("button", { className: "btn ghost", type: "button", onclick: () => openWordsDialog(s) }, "Palavras")
+        : "",
       el("button", { className: "btn ghost", type: "button", onclick: () => openCoverDialog(s) }, "Capa"),
       el("button", { className: "btn ghost", type: "button", onclick: () => removeSong(s) }, "Apagar"));
 
@@ -220,6 +229,36 @@ async function chooseLyrics(result, button) {
     button.disabled = false;
   }
 }
+
+/* ============================================================
+   Diálogo: palavras sincronizadas (alinhamento na voz isolada)
+   ============================================================ */
+function openWordsDialog(song) {
+  dialogSong = song;
+  $("words-lang").value = store.get("wordsLang", "pt");
+  const running = song.wordsState === "RUNNING";
+  $("words-go").disabled = running;
+  $("words-go").textContent = song.files.words ? "Refazer palavras" : "Sincronizar palavras";
+  setStatus("words-status", running
+    ? "Sincronizando… pode levar alguns minutos. Você pode fechar esta janela."
+    : song.files.words ? "Esta música já tem palavras sincronizadas. Refazer substitui as atuais." : "");
+  $("dlg-words").showModal();
+}
+
+$("words-go").addEventListener("click", async () => {
+  const language = $("words-lang").value;
+  store.set("wordsLang", language);
+  $("words-go").disabled = true;
+  setStatus("words-status", "Enviando…");
+  try {
+    replaceSong(await api(`${API}/${dialogSong.id}/words?language=${encodeURIComponent(language)}`, { method: "POST" }));
+    $("dlg-words").close();
+    refresh(); // começa a acompanhar o andamento
+  } catch (e) {
+    setStatus("words-status", e.message, true);
+    $("words-go").disabled = false;
+  }
+});
 
 /* ============================================================
    Diálogo: capa (iTunes)
@@ -526,6 +565,8 @@ function unloadSong() {
   current = null;
   loadedRev = -1;
   lyrics = [];
+  wordEls = [];
+  hideCountdown();
   $("now-title").textContent = "Escolha uma música";
   $("now-artist").textContent = "Quando a separação terminar, clique em “Cantar”.";
   $("mixer").hidden = true;
@@ -542,6 +583,8 @@ function unloadSong() {
    ============================================================ */
 let lyrics = [];          // [{ t: segundos, text }]
 let lineEls = [];
+let wordEls = [];         // por linha: lista de <span> das palavras (ou null se a linha não tem palavras alinhadas)
+let shownCountdown = 0;   // número da contagem regressiva exibido agora (0 = escondida)
 let activeIdx = -2;
 let offsetMs = 0;         // atraso da letra (positivo = aparece mais tarde)
 let offsetSaveTimer = null;
@@ -589,22 +632,66 @@ async function applyAssets() {
       if (res.ok) lyrics = parseLrc(await res.text());
     } catch (_) { /* fica sem letra */ }
   }
+
+  let wordsData = null;
+  const wordsUrl = mediaUrl(song, "words");
+  if (wordsUrl) {
+    try {
+      const res = await fetch(wordsUrl);
+      if (res.ok) wordsData = await res.json();
+    } catch (_) { /* sem palavras: usa o preenchimento por linha */ }
+  }
   if (!current || current.id !== song.id) return;
+  attachWords(wordsData);
   buildLyricsDom();
   updateSyncInfo();
   renderLyrics(position(), true);
+}
+
+const normText = (text) => text.toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Liga as palavras alinhadas (words.json) às linhas do LRC pelo tempo da linha. */
+function attachWords(data) {
+  if (!data || !Array.isArray(data.lines)) return;
+  const byTime = new Map();
+  for (const line of data.lines) {
+    if (line.aligned && Array.isArray(line.words) && line.words.length) {
+      byTime.set(Math.round(line.t * 1000), line);
+    }
+  }
+  for (const l of lyrics) {
+    const hit = byTime.get(Math.round(l.t * 1000));
+    // se o texto não bate, a letra mudou depois do alinhamento: essa linha fica com o preenchimento estimado
+    if (hit && normText(hit.text) === normText(l.text)) l.words = hit.words;
+  }
 }
 
 function buildLyricsDom() {
   const track = $("lyrics-track");
   track.replaceChildren();
   track.style.transform = "translateY(0)";
+  wordEls = [];
   lineEls = lyrics.map((l) => {
-    const line = el("div", { className: "ly" }, el("span", { className: "ly-text" }, l.text || "♪"));
+    const text = el("span", { className: "ly-text" });
+    let spans = null;
+    if (l.words) {
+      text.classList.add("by-word");
+      spans = l.words.map((w, k) => {
+        const node = el("span", { className: "w" }, w.w);
+        text.append(node);
+        if (k < l.words.length - 1) text.append(" ");
+        return node;
+      });
+    } else {
+      text.textContent = l.text || "♪";
+    }
+    wordEls.push(spans);
+    const line = el("div", { className: "ly" }, text);
     track.append(line);
     return line;
   });
   activeIdx = -2;
+  hideCountdown();
   $("no-lyrics").hidden = lyrics.length > 0;
 }
 
@@ -633,12 +720,25 @@ function renderLyrics(pos, force = false) {
     centerLine(pivot);
   }
   if (idx >= 0) {
-    const start = lyrics[idx].t;
-    const next = idx + 1 < lyrics.length ? lyrics[idx + 1].t : start + 7;
-    const span = Math.max(0.5, Math.min(next - start, 7));
-    const p = Math.min(1, Math.max(0, (t - start) / span));
-    lineEls[idx].style.setProperty("--p", `${(p * 100).toFixed(1)}%`);
+    const spans = wordEls[idx];
+    if (spans) {
+      // cada palavra enche entre o início e o fim alinhados a ela
+      const words = lyrics[idx].words;
+      for (let k = 0; k < words.length; k++) {
+        const w = words[k];
+        const p = Math.min(1, Math.max(0, (t - w.s) / Math.max(0.05, w.e - w.s)));
+        spans[k].style.setProperty("--wp", `${(p * 100).toFixed(0)}%`);
+      }
+    } else {
+      // sem palavras alinhadas: estimativa linear ao longo da linha
+      const start = lyrics[idx].t;
+      const next = idx + 1 < lyrics.length ? lyrics[idx + 1].t : start + 7;
+      const span = Math.max(0.5, Math.min(next - start, 7));
+      const p = Math.min(1, Math.max(0, (t - start) / span));
+      lineEls[idx].style.setProperty("--p", `${(p * 100).toFixed(1)}%`);
+    }
   }
+  renderCountdown(t, idx);
 }
 
 function centerLine(i) {
@@ -647,6 +747,66 @@ function centerLine(i) {
   const viewportHeight = $("lyrics-viewport").clientHeight;
   const y = viewportHeight * 0.42 - (target.offsetTop + target.offsetHeight / 2);
   $("lyrics-track").style.transform = `translateY(${y}px)`;
+}
+
+/* ---------- contagem regressiva ---------- */
+const COUNTDOWN_SECONDS = 3;   // quantos segundos antes da voz entrar
+const COUNTDOWN_MIN_GAP = 5;   // só avisa depois de uma pausa de pelo menos isto (evita piscar entre frases)
+
+const startOf = (line) => (line.words ? line.words[0].s : line.t);
+
+/** Quando a linha i termina de ser cantada (estimado se ela não tem palavras alinhadas). */
+function endOf(i) {
+  const l = lyrics[i];
+  if (l.words) return l.words[l.words.length - 1].e;
+  const next = lyrics[i + 1];
+  return l.t + (next ? Math.min(next.t - l.t, 7) : 7);
+}
+
+function nextSungIndex(from) {
+  for (let i = from; i < lyrics.length; i++) if (lyrics[i].text) return i;
+  return -1;
+}
+
+/** 3, 2 ou 1 quando a voz está prestes a voltar depois de uma pausa; 0 caso contrário. */
+function countdownValue(t, idx) {
+  let next;
+  let gapStart;
+  if (idx < 0) {                       // introdução, antes de qualquer linha
+    next = nextSungIndex(0);
+    gapStart = 0;
+  } else if (!lyrics[idx].text) {      // trecho instrumental marcado com ♪
+    next = nextSungIndex(idx + 1);
+    gapStart = lyrics[idx].t;
+  } else {                             // pausa longa sem marcador: depois do fim da linha atual
+    gapStart = endOf(idx);
+    if (t < gapStart) return 0;
+    next = nextSungIndex(idx + 1);
+  }
+  if (next < 0) return 0;
+  const singStart = startOf(lyrics[next]);
+  if (singStart - gapStart < COUNTDOWN_MIN_GAP) return 0;
+  const left = singStart - t;
+  return left > 0 && left <= COUNTDOWN_SECONDS ? Math.ceil(left) : 0;
+}
+
+function renderCountdown(t, idx) {
+  const value = countdownValue(t, idx);
+  if (value === shownCountdown) return;
+  shownCountdown = value;
+  const box = $("countdown");
+  box.hidden = value === 0;
+  if (value) {
+    $("countdown-num").textContent = String(value);
+    box.classList.remove("tick");
+    void box.offsetWidth; // reinicia a animação de pulso a cada número
+    box.classList.add("tick");
+  }
+}
+
+function hideCountdown() {
+  shownCountdown = 0;
+  $("countdown").hidden = true;
 }
 
 /* ---------- ajuste de sincronia ---------- */
@@ -743,6 +903,7 @@ function closeStage() {
   if (stage.hidden) return;
   stage.hidden = true;
   panel.hidden = true;
+  hideCountdown();
   document.body.classList.remove("stage-open");
   clearTimeout(idleTimer);
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});

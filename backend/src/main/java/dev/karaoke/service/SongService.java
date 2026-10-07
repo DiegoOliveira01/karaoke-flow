@@ -5,7 +5,6 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -66,6 +65,9 @@ public class SongService {
                 }
                 try {
                     Song song = mapper.readValue(meta.toFile(), Song.class);
+                    if (Song.WORDS_RUNNING.equals(song.wordsState())) {
+                        song = song.withWordsState(null, null); // o alinhamento morreu com o processo
+                    }
                     songs.put(song.id(), song);
                     // O processo caiu no meio? Recoloca na fila.
                     if (song.status() == SongStatus.QUEUED || song.status() == SongStatus.SEPARATING) {
@@ -107,7 +109,7 @@ public class SongService {
 
         String cleanTitle = (title == null || title.isBlank()) ? stripExtension(original) : title.trim();
         String cleanArtist = (artist == null || artist.isBlank()) ? "" : artist.trim();
-        Song song = new Song(id, cleanTitle, cleanArtist, SongStatus.QUEUED, null, Instant.now(), Map.of(), 0, 0);
+        Song song = Song.queued(id, cleanTitle, cleanArtist);
         persist(song);
         enqueue(song);
         return song;
@@ -134,7 +136,9 @@ public class SongService {
             return Optional.empty();
         }
         try {
-            Files.writeString(root.resolve(id).resolve("lyrics.lrc"), lrc, StandardCharsets.UTF_8);
+            Path dir = root.resolve(id);
+            Files.writeString(dir.resolve("lyrics.lrc"), lrc, StandardCharsets.UTF_8);
+            Files.deleteIfExists(dir.resolve("words.json")); // era da letra anterior
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -157,6 +161,57 @@ public class SongService {
             throw new UncheckedIOException(e);
         }
         return update(id, s -> s.withFile("cover", name));
+    }
+
+    /**
+     * Enfileira o alinhamento palavra a palavra (usa a voz isolada + a letra).
+     * Vazio se a música não existe; IllegalStateException se ainda não dá para alinhar.
+     */
+    public Optional<Song> requestWords(String id, String language) {
+        Song updated = songs.computeIfPresent(id, (k, s) -> {
+            if (s.status() != SongStatus.READY) {
+                throw new IllegalStateException("A música ainda não terminou de ser separada");
+            }
+            if (!s.files().containsKey("lyrics")) {
+                throw new IllegalStateException("Escolha uma letra sincronizada antes");
+            }
+            if (Song.WORDS_RUNNING.equals(s.wordsState())) {
+                throw new IllegalStateException("O alinhamento já está em andamento");
+            }
+            return s.withWordsState(Song.WORDS_RUNNING, null);
+        });
+        if (updated == null) {
+            return Optional.empty();
+        }
+        persist(updated);
+        worker.submit(() -> alignWords(id, language));
+        return Optional.of(updated);
+    }
+
+    private void alignWords(String id, String language) {
+        Song song = songs.get(id);
+        if (song == null) {
+            return;
+        }
+        Path dir = root.resolve(id);
+        Path lrc = dir.resolve("lyrics.lrc");
+        Path words = dir.resolve("words.json");
+        try {
+            var lyricsStamp = Files.getLastModifiedTime(lrc);
+            separator.align(dir.resolve(song.files().get("lead")), lrc, words, language);
+
+            if (!Files.getLastModifiedTime(lrc).equals(lyricsStamp)) {
+                // a letra foi trocada durante o alinhamento: este resultado já nasceu velho
+                Files.deleteIfExists(words);
+                update(id, s -> s.withWordsState(null, null));
+                return;
+            }
+            update(id, s -> s.withWordsReady("words.json"));
+        } catch (Exception e) {
+            log.error("Falha ao alinhar palavras de {}", id, e);
+            String message = e.getMessage();
+            update(id, s -> s.withWordsState(Song.WORDS_FAILED, message));
+        }
     }
 
     public Optional<Song> setLyricsOffset(String id, int offsetMs) {

@@ -13,6 +13,6 @@ karaoke:
   storage-dir: ./data/songs
   separator:
     url: http://127.0.0.1:8001
-    read-timeout: 3h   # separar uma música pode demorar bastante sem GPU
+    read-timeout: 30m   # separar uma música pode demorar bastante sem GPU
   itunes:
     country: BR         # loja usada na busca de capas
