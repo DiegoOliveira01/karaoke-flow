@@ -4,6 +4,7 @@
    Utilitários
    ============================================================ */
 const API = "/api/songs";
+const CARD_STATUS = { QUEUED: "Na fila", SEPARATING: "Separando…" };
 const STATUS_LABEL = {
   QUEUED: "Na fila",
   SEPARATING: "Separando as vozes…",
@@ -103,51 +104,139 @@ function syncCurrent(fresh) {
   if (fresh.rev !== loadedRev) applyAssets();
 }
 
+/* ---------- biblioteca: busca, ordenação e visual ---------- */
+const savedLib = store.get("lib", {});
+const lib = {
+  query: "",
+  sort: ["recent", "title", "artist"].includes(savedLib.sort) ? savedLib.sort : "recent",
+  mode: savedLib.mode === "list" || savedLib.mode === "grid" ? savedLib.mode
+    : (window.matchMedia && window.matchMedia("(max-width: 560px)").matches ? "list" : "grid"),
+};
+const saveLib = () => store.set("lib", { sort: lib.sort, mode: lib.mode });
+
+/** Sem acentos e em minúsculas, para a busca achar "coracao" em "Coração". */
+const plain = (text) => (text || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+function visibleSongs() {
+  const q = plain(lib.query.trim());
+  const list = songs.filter((s) => !q || plain(`${s.title} ${s.artist}`).includes(q));
+  const byText = (a, b) => a.localeCompare(b, "pt", { sensitivity: "base" });
+  if (lib.sort === "title") list.sort((a, b) => byText(a.title, b.title));
+  else if (lib.sort === "artist") {
+    list.sort((a, b) => byText(a.artist || "\uffff", b.artist || "\uffff") || byText(a.title, b.title));
+  } else list.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+  return list;
+}
+
+/** Capa de mentira quando a música não tem imagem: cor própria (pelo nome) e as iniciais. */
+function placeholderInfo(song) {
+  let h = 0;
+  for (const ch of `${song.title}${song.artist || ""}`) h = (h * 31 + ch.codePointAt(0)) % 360;
+  const letters = (song.title.match(/[\p{L}\p{N}]/gu) || []).slice(0, 2).join("").toUpperCase() || "♪";
+  return { letters, background: `linear-gradient(135deg, hsl(${h} 55% 42%), hsl(${(h + 55) % 360} 60% 22%))` };
+}
+
+function tag(label, state) {
+  const text = state === "ok" ? `✓ ${label}` : state === "busy" ? `${label}…` : label;
+  return el("span", { className: `tag ${state}` }, text);
+}
+
+function songCard(s, menuOpen) {
+  const cover = mediaUrl(s, "cover");
+  const hasLyrics = !!(s.files && s.files.lyrics);
+  const hasWords = !!(s.files && s.files.words);
+  const pending = s.status === "QUEUED" || s.status === "SEPARATING";
+
+  let art;
+  if (cover) {
+    art = el("img", { src: cover, alt: "", loading: "lazy" });
+  } else {
+    const ph = placeholderInfo(s);
+    art = el("div", { className: "ph", "aria-hidden": "true" }, ph.letters);
+    art.style.background = ph.background;
+  }
+  const media = el("div", { className: "cover" }, art,
+    el("span", { className: "eq", "aria-hidden": "true" }, el("i"), el("i"), el("i")),
+    s.status === "FAILED" ? el("span", { className: "badge-status bad" }, "Falhou") : "");
+
+  const body = el("div", { className: "song-body" },
+    el("div", { className: "song-title", title: s.title }, s.title),
+    el("div", { className: "song-artist" + (s.artist ? "" : " none") }, s.artist || "sem artista"),
+    el("div", { className: "tags" },
+      tag("letra", hasLyrics ? "ok" : "off"),
+      hasLyrics ? tag("palavras", s.wordsState === "RUNNING" ? "busy" : hasWords ? "ok" : "off") : "",
+      tag("capa", cover ? "ok" : "off")));
+  if (s.status === "FAILED" && s.error) body.append(el("div", { className: "song-error" }, s.error));
+  if (s.wordsState === "FAILED" && s.wordsError) {
+    body.append(el("div", { className: "song-error" }, `Palavras: ${s.wordsError}`));
+  }
+
+  const actions = el("div", { className: "song-actions" });
+  if (s.status === "READY") {
+    actions.append(el("button", {
+      className: "btn", type: "button", "aria-label": `Cantar ${s.title}`, onclick: () => loadSong(s),
+    }, el("span", { "aria-hidden": "true" }, "▶"), el("span", { className: "lb" }, " Cantar")));
+  } else if (pending) {
+    actions.append(el("div", { className: "proc", title: STATUS_LABEL[s.status] },
+      el("span", { className: "spin", "aria-hidden": "true" }), el("span", { className: "lb" }, CARD_STATUS[s.status])));
+  }
+
+  const menu = el("details", { className: "menu" });
+  if (menuOpen) menu.setAttribute("open", "");
+  const item = (label, action, cls = "") => el("button", {
+    type: "button", className: cls, onclick: () => { menu.removeAttribute("open"); action(); },
+  }, label);
+  menu.append(
+    el("summary", { title: "Mais ações", "aria-label": `Mais ações para ${s.title}` }, "⋯"),
+    el("div", { className: "menu-list" },
+      item(hasLyrics ? "Trocar letra" : "Escolher letra", () => openLyricsDialog(s)),
+      s.status === "READY" && hasLyrics ? item("Palavras sincronizadas", () => openWordsDialog(s)) : "",
+      item(cover ? "Trocar capa" : "Escolher capa", () => openCoverDialog(s)),
+      item("Apagar", () => removeSong(s), "danger")));
+  actions.append(menu);
+
+  const li = el("li", { className: "song" + (current && s.id === current.id ? " active" : "") }, media, body, actions);
+  li.dataset.status = s.status;
+  li.dataset.id = s.id;
+  return li;
+}
+
+function emptyState(message, withButton) {
+  const box = el("li", { className: "empty-state" },
+    el("div", { className: "big", "aria-hidden": "true" }, "♪"),
+    el("h2", {}, message.title),
+    el("p", {}, message.text));
+  if (withButton) {
+    box.append(el("button", { className: "btn", type: "button", onclick: () => openAddDialog() }, "+ Adicionar música"));
+  }
+  return box;
+}
+
 function renderSongs() {
+  renderNowPlaying();
   const list = $("songs");
+  // as atualizações automáticas (a cada 3 s enquanto separa) não podem fechar um menu que o usuário abriu
+  const openMenu = list.querySelector(".menu[open]");
+  const openId = openMenu ? openMenu.closest(".song").dataset.id : null;
+
   list.replaceChildren();
-  if (songs.length === 0) {
-    list.append(el("li", { className: "empty" }, "Nenhuma música ainda. Envie um arquivo de áudio acima."));
+  list.className = `songs ${lib.mode}`;
+  const shown = visibleSongs();
+  const n = songs.length;
+  $("lib-count").textContent = n === 0 ? "" : shown.length === n ? `${n} ${n === 1 ? "música" : "músicas"}` : `${shown.length} de ${n}`;
+
+  if (n === 0) {
+    list.append(emptyState({
+      title: "Sua biblioteca está vazia",
+      text: "Adicione um arquivo de áudio (ou arraste-o para esta tela). As vozes são separadas automaticamente.",
+    }, true));
     return;
   }
-  for (const s of songs) {
-    const cover = mediaUrl(s, "cover");
-    const thumb = cover
-      ? el("img", { className: "thumb", src: cover, alt: "", loading: "lazy" })
-      : el("div", { className: "thumb empty", "aria-hidden": "true" }, "♪");
-
-    const meta = [s.artist, STATUS_LABEL[s.status]].filter(Boolean).join(" • ");
-    const hasLyrics = !!(s.files && s.files.lyrics);
-    const hasWords = !!(s.files && s.files.words);
-    const wordsLabel = s.wordsState === "RUNNING" ? "palavras…" : hasWords ? "palavras ✓" : "sem palavras";
-    const info = el("div", {},
-      el("div", { className: "song-title" }, s.title),
-      el("div", { className: "song-meta" }, meta),
-      el("div", { className: "tags" },
-        el("span", { className: "tag" + (hasLyrics ? " ok" : "") }, hasLyrics ? "letra ✓" : "sem letra"),
-        el("span", { className: "tag" + (cover ? " ok" : "") }, cover ? "capa ✓" : "sem capa"),
-        hasLyrics ? el("span", { className: "tag" + (hasWords ? " ok" : "") }, wordsLabel) : ""));
-    if (s.status === "FAILED" && s.error) info.append(el("div", { className: "song-error" }, s.error));
-    if (s.wordsState === "FAILED" && s.wordsError) {
-      info.append(el("div", { className: "song-error" }, `Palavras: ${s.wordsError}`));
-    }
-
-    const actions = el("div", { className: "song-actions" });
-    if (s.status === "READY") {
-      actions.append(el("button", { className: "btn", type: "button", onclick: () => loadSong(s) }, "Cantar"));
-    }
-    actions.append(
-      el("button", { className: "btn ghost", type: "button", onclick: () => openLyricsDialog(s) }, "Letra"),
-      s.status === "READY" && hasLyrics
-        ? el("button", { className: "btn ghost", type: "button", onclick: () => openWordsDialog(s) }, "Palavras")
-        : "",
-      el("button", { className: "btn ghost", type: "button", onclick: () => openCoverDialog(s) }, "Capa"),
-      el("button", { className: "btn ghost", type: "button", onclick: () => removeSong(s) }, "Apagar"));
-
-    const li = el("li", { className: "song" + (current && s.id === current.id ? " active" : "") }, thumb, info, actions);
-    li.dataset.status = s.status;
-    list.append(li);
+  if (shown.length === 0) {
+    list.append(emptyState({ title: "Nada encontrado", text: `Nenhuma música combina com “${lib.query.trim()}”.` }, false));
+    return;
   }
+  for (const s of shown) list.append(songCard(s, s.id === openId));
 }
 
 async function removeSong(song) {
@@ -157,22 +246,207 @@ async function removeSong(song) {
   refresh();
 }
 
+/* ---------- painel "tocando agora" ---------- */
+function updateTitle() {
+  document.title = current ? `${audio.playing ? "▶ " : ""}${current.title} — Karaokê` : "Karaokê";
+}
+
+function renderNowPlaying() {
+  const player = $("player");
+  player.classList.toggle("empty", !current);
+  const cover = current ? mediaUrl(current, "cover") : null;
+  const box = $("np-cover");
+  box.style.background = "";
+  box.style.backgroundImage = "";
+  box.textContent = "";
+  if (!current) {
+    box.textContent = "♪";
+  } else if (cover) {
+    box.style.backgroundImage = `url("${cover}")`;
+  } else {
+    const ph = placeholderInfo(current);
+    box.style.background = ph.background;
+    box.textContent = ph.letters;
+  }
+  player.style.setProperty("--np-art", cover ? `url("${cover}")` : "none");
+  $("np-eyebrow").textContent = current ? "Tocando agora" : "Player";
+}
+
+/* ---------- avisos rápidos ---------- */
+let toastTimer = null;
+function toast(message) {
+  const node = $("toast");
+  node.textContent = message;
+  node.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { node.hidden = true; }, 4000);
+}
+
+/* ---------- frase da tela principal (uma nova a cada carregamento) ---------- */
+function showQuote() {
+  const list = window.QUOTES;
+  if (!Array.isArray(list) || list.length === 0) {
+    $("quote").hidden = true;
+    return;
+  }
+  const last = store.get("lastQuote", -1);
+  let i = Math.floor(Math.random() * list.length);
+  if (list.length > 1 && i === last) i = (i + 1) % list.length; // nunca repete a da vez anterior
+  store.set("lastQuote", i);
+  const q = list[i];
+  $("quote-text").textContent = `“${q.text}”`;
+  $("quote-author").textContent = q.author ? `— ${q.author}` : "";
+  $("quote").title = q.author ? `${q.text} — ${q.author}` : q.text;
+}
+
+/* ---------- adicionar músicas (diálogo, arrastar e soltar, vários arquivos) ---------- */
+const AUDIO_EXT = /\.(mp3|flac|wav|m4a|aac|ogg|opus|wma|aiff?|alac|webm)$/i;
+const isAudio = (file) => (file.type || "").startsWith("audio/") || AUDIO_EXT.test(file.name);
+
+/** "03 - Artista - Título.mp3" -> { artist, title }. Sem " - " no nome, tudo vira título. */
+function guessMeta(filename) {
+  let base = filename.replace(/\.[^.]+$/, "").replace(/_+/g, " ").trim();
+  base = base.replace(/^\d{1,3}\s*[-–.)]\s*/, ""); // número da faixa
+  const m = base.match(/^(.+?)\s+[-–]\s+(.+)$/);
+  return m ? { artist: m[1].trim(), title: m[2].trim() } : { artist: "", title: base };
+}
+
+const addInput = $("add-file");
+
+function onAddFilesChosen() {
+  const files = [...addInput.files];
+  const many = files.length > 1;
+  $("add-title").disabled = many;
+  $("add-artist").disabled = many;
+  $("dropzone").classList.toggle("picked", files.length > 0);
+  $("add-btn").disabled = files.length === 0;
+  $("add-btn").textContent = many ? `Separar vozes de ${files.length} músicas` : "Separar vozes";
+
+  if (files.length === 0) {
+    $("dz-title").textContent = "Arraste um áudio aqui ou clique para escolher";
+    $("dz-sub").textContent = "MP3, FLAC, WAV, M4A… você pode escolher vários de uma vez";
+    $("add-hint").textContent = "Título e artista ajudam a achar a letra e a capa depois.";
+    return;
+  }
+  if (many) {
+    $("dz-title").textContent = `${files.length} arquivos selecionados`;
+    $("dz-sub").textContent = files.slice(0, 3).map((f) => f.name).join(", ") + (files.length > 3 ? "…" : "");
+    $("add-hint").textContent = "Título e artista serão deduzidos dos nomes dos arquivos (formato “Artista - Título”).";
+    return;
+  }
+  const guess = guessMeta(files[0].name);
+  $("dz-title").textContent = files[0].name;
+  $("dz-sub").textContent = `${(files[0].size / 1048576).toFixed(1)} MB · clique para trocar`;
+  $("add-hint").textContent = "Confira o título e o artista: ajudam a achar a letra e a capa depois.";
+  if (!$("add-title").value) $("add-title").value = guess.title;
+  if (!$("add-artist").value) $("add-artist").value = guess.artist;
+}
+addInput.addEventListener("change", onAddFilesChosen);
+
+function openAddDialog(files) {
+  $("add-form").reset();
+  setStatus("add-status", "");
+  onAddFilesChosen();
+  if (!$("dlg-add").open) $("dlg-add").showModal();
+  if (files && files.length) setAddFiles(files);
+}
+
+function setAddFiles(files) {
+  if (typeof DataTransfer === "undefined") {
+    setStatus("add-status", "Este navegador não permite arrastar aqui. Use a área acima para escolher.", true);
+    return;
+  }
+  const transfer = new DataTransfer();
+  for (const file of files) transfer.items.add(file);
+  addInput.files = transfer.files;
+  onAddFilesChosen();
+}
+
+$("add-open").addEventListener("click", () => openAddDialog());
+
 $("add-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const form = ev.currentTarget;
+  const files = [...addInput.files];
+  if (files.length === 0) return;
+  const many = files.length > 1;
   $("add-btn").disabled = true;
-  setStatus("add-status", "Enviando…");
+  let sent = 0;
   try {
-    await api(API, { method: "POST", body: new FormData(form) });
-    form.reset();
-    setStatus("add-status", "Enviada. A separação começa assim que chegar a vez dela.");
+    for (const file of files) {
+      setStatus("add-status", many ? `Enviando ${sent + 1} de ${files.length}…` : "Enviando…");
+      const guess = guessMeta(file.name);
+      const body = new FormData();
+      body.append("file", file);
+      body.append("title", many ? guess.title : $("add-title").value.trim() || guess.title);
+      body.append("artist", many ? guess.artist : $("add-artist").value.trim() || guess.artist);
+      await api(API, { method: "POST", body });
+      sent++;
+    }
+    $("dlg-add").close();
+    toast(sent === 1 ? "Música enviada. Separando as vozes…" : `${sent} músicas enviadas. Separando as vozes…`);
     refresh();
   } catch (e) {
-    setStatus("add-status", e.message || "Não foi possível enviar.", true);
-  } finally {
+    const done = sent ? ` (${sent} já ${sent === 1 ? "foi enviada" : "foram enviadas"})` : "";
+    setStatus("add-status", `${e.message || "Não foi possível enviar."}${done}`, true);
     $("add-btn").disabled = false;
+    if (sent) refresh();
   }
 });
+
+/* ---------- ligações da biblioteca ---------- */
+function syncViewButtons() {
+  for (const b of document.querySelectorAll("[data-view]")) b.setAttribute("aria-pressed", String(b.dataset.view === lib.mode));
+}
+
+function initLibraryUi() {
+  $("sort").value = lib.sort;
+  syncViewButtons();
+  $("search").addEventListener("input", (e) => { lib.query = e.target.value; renderSongs(); });
+  $("sort").addEventListener("change", (e) => { lib.sort = e.target.value; saveLib(); renderSongs(); });
+  for (const b of document.querySelectorAll("[data-view]")) {
+    b.addEventListener("click", () => { lib.mode = b.dataset.view; saveLib(); syncViewButtons(); renderSongs(); });
+  }
+
+  // menus ⋯: fecham ao clicar fora ou com Esc
+  document.addEventListener("click", (e) => {
+    for (const m of document.querySelectorAll(".menu[open]")) if (!m.contains(e.target)) m.removeAttribute("open");
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") for (const m of document.querySelectorAll(".menu[open]")) m.removeAttribute("open");
+    // "/" foca a busca (menos quando se está digitando, ou em outra tela)
+    if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const tag = e.target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (!$("stage").hidden || !$("editor").hidden || document.querySelector("dialog[open]")) return;
+      e.preventDefault();
+      $("search").focus();
+    }
+  });
+
+  // arrastar arquivos de áudio para qualquer lugar da página
+  let depth = 0;
+  const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes("Files");
+  window.addEventListener("dragenter", (e) => {
+    if (!hasFiles(e)) return;
+    depth++;
+    if (!document.querySelector("dialog[open]")) $("drop-overlay").hidden = false;
+  });
+  window.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener("dragleave", (e) => {
+    if (!hasFiles(e)) return;
+    depth = Math.max(0, depth - 1);
+    if (depth === 0) $("drop-overlay").hidden = true;
+  });
+  window.addEventListener("drop", (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault();
+    depth = 0;
+    $("drop-overlay").hidden = true;
+    const files = [...e.dataTransfer.files].filter(isAudio);
+    if (files.length === 0) { toast("Nenhum arquivo de áudio encontrado."); return; }
+    if ($("dlg-add").open) setAddFiles(files); else openAddDialog(files);
+  });
+}
 
 /* ============================================================
    Diálogo: letra (LRCLIB)
@@ -327,8 +601,8 @@ const mixerUIs = [];
 
 function buildMixer(slot, withHints) {
   const ui = { inputs: {}, outs: {}, presets: {} };
-  ui.presets.karaoke = el("button", { className: "btn", type: "button", onclick: () => setPreset("karaoke") },
-    "Karaokê (sem a voz do cantor)");
+  ui.presets.karaoke = el("button", { className: "btn", type: "button", title: "Sem a voz do cantor", onclick: () => setPreset("karaoke") },
+    "Karaokê");
   ui.presets.original = el("button", { className: "btn ghost", type: "button", onclick: () => setPreset("original") },
     "Original");
   const faders = el("div", { className: "faders" });
@@ -420,6 +694,8 @@ function stopSources() {
 function setPlayIcons() {
   const icon = audio.playing ? "❚❚" : "▶";
   const label = audio.playing ? "Pausar" : "Tocar";
+  document.body.classList.toggle("is-playing", audio.playing);
+  updateTitle();
   for (const id of ["play", "st-play", "ed-play"]) {
     $(id).textContent = icon;
     $(id).setAttribute("aria-label", label);
@@ -531,6 +807,9 @@ async function loadSong(song) {
   loadedRev = -1;
   renderSongs();
   setPlayIcons();
+  if (window.matchMedia && window.matchMedia("(max-width: 960px)").matches) {
+    $("player").scrollIntoView({ behavior: "smooth", block: "start" }); // no celular o player fica acima da lista
+  }
 
   $("now-title").textContent = song.title;
   $("now-artist").textContent = song.artist || "";
@@ -640,6 +919,7 @@ async function applyAssets() {
   const bg = $("stage-bg");
   bg.style.backgroundImage = cover ? `url("${cover}")` : "";
   bg.classList.toggle("has-art", !!cover);
+  renderNowPlaying();
   $("st-title").textContent = song.title;
   $("st-artist").textContent = song.artist || "";
 
@@ -1529,4 +1809,6 @@ buildMixer($("mixer-slot"), true);
 buildMixer($("stage-mixer-slot"), false);
 applyMix();
 applyDisplay();
+initLibraryUi();
+showQuote();
 refresh();

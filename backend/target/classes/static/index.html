@@ -3,34 +3,53 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Karaokê</title>
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
+<header class="topbar">
+  <div class="brand">
+    <h1>Karaokê</h1>
+    <p class="quote" id="quote"><span id="quote-text"></span><span class="q-author" id="quote-author"></span></p>
+  </div>
+  <button class="btn add-open" id="add-open" type="button">+ Adicionar música</button>
+</header>
+
 <div class="app">
 
   <!-- ===== biblioteca ===== -->
   <section class="library" aria-label="Músicas">
-    <h1>Karaokê</h1>
+    <div class="toolbar">
+      <label class="search">
+        <span class="sr-only">Buscar música ou artista</span>
+        <input type="search" id="search" placeholder="Buscar música ou artista   ( / )" autocomplete="off">
+      </label>
+      <select id="sort" aria-label="Ordenar músicas">
+        <option value="recent">Mais recentes</option>
+        <option value="title">Título (A–Z)</option>
+        <option value="artist">Artista (A–Z)</option>
+      </select>
+      <div class="seg" role="group" aria-label="Visualização">
+        <button type="button" data-view="grid" aria-pressed="true" title="Grade" aria-label="Grade">▦</button>
+        <button type="button" data-view="list" aria-pressed="false" title="Lista" aria-label="Lista">☰</button>
+      </div>
+      <span class="count" id="lib-count" aria-live="polite"></span>
+    </div>
 
-    <form class="card add-form" id="add-form">
-      <h2>Adicionar música</h2>
-      <input type="text" name="title" placeholder="Título (opcional)" autocomplete="off">
-      <input type="text" name="artist" placeholder="Artista (opcional)" autocomplete="off">
-      <input type="file" name="file" accept="audio/*" required>
-      <button class="btn" type="submit" id="add-btn">Separar vozes</button>
-      <div class="status" id="add-status" role="status"></div>
-    </form>
-
-    <ul class="songs" id="songs"></ul>
+    <ul class="songs grid" id="songs"></ul>
   </section>
 
-  <!-- ===== preview (player simples) ===== -->
-  <section class="player" aria-label="Player">
-    <div class="now">
-      <h2 id="now-title">Escolha uma música</h2>
-      <p id="now-artist">Quando a separação terminar, clique em “Cantar”.</p>
+  <!-- ===== player (preview) ===== -->
+  <aside class="player empty" id="player" aria-label="Player">
+    <div class="np-head">
+      <div class="np-cover" id="np-cover" aria-hidden="true">♪</div>
+      <div class="now">
+        <p class="eyebrow" id="np-eyebrow">Player</p>
+        <h2 id="now-title">Escolha uma música</h2>
+        <p id="now-artist">Quando a separação terminar, clique em “Cantar”.</p>
+      </div>
     </div>
 
     <div class="transport">
@@ -45,8 +64,31 @@
     </div>
 
     <div class="status" id="player-status" role="status"></div>
-  </section>
+  </aside>
 </div>
+
+<!-- ===== diálogo: adicionar músicas ===== -->
+<dialog id="dlg-add" aria-labelledby="dlg-add-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-add-title">Adicionar música</h2>
+    <button class="btn ghost" aria-label="Fechar">Fechar</button>
+  </form>
+  <form class="add-form" id="add-form">
+    <label class="dropzone" id="dropzone">
+      <input type="file" id="add-file" name="file" accept="audio/*" multiple required>
+      <span class="dz-icon" aria-hidden="true">♪</span>
+      <strong id="dz-title">Arraste um áudio aqui ou clique para escolher</strong>
+      <span id="dz-sub">MP3, FLAC, WAV, M4A… você pode escolher vários de uma vez</span>
+    </label>
+    <div class="add-fields">
+      <input type="text" id="add-title" name="title" placeholder="Título (opcional)" autocomplete="off">
+      <input type="text" id="add-artist" name="artist" placeholder="Artista (opcional)" autocomplete="off">
+    </div>
+    <p class="hint" id="add-hint">Título e artista ajudam a achar a letra e a capa depois.</p>
+    <button class="btn" type="submit" id="add-btn" disabled>Separar vozes</button>
+    <div class="status" id="add-status" role="status"></div>
+  </form>
+</dialog>
 
 <!-- ===== diálogo: escolher letra ===== -->
 <dialog id="dlg-lyrics" aria-labelledby="dlg-lyrics-title">
@@ -241,6 +283,10 @@
   </footer>
 </div>
 
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<div class="drop-overlay" id="drop-overlay" hidden aria-hidden="true">Solte o áudio para adicionar</div>
+
+<script src="quotes.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
