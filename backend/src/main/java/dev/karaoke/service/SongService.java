@@ -3,8 +3,10 @@ package dev.karaoke.service;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -29,6 +31,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import dev.karaoke.config.KaraokeProperties;
 import dev.karaoke.model.Song;
 import dev.karaoke.model.SongStatus;
+import dev.karaoke.model.WordsFile;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 
@@ -44,6 +47,8 @@ public class SongService {
             .registerModule(new JavaTimeModule())
             .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
             .enable(SerializationFeature.INDENT_OUTPUT);
+
+    private final ObjectMapper compactMapper = mapper.copy().disable(SerializationFeature.INDENT_OUTPUT);
 
     private final Map<String, Song> songs = new ConcurrentHashMap<>();
     // A GPU é o gargalo: uma música por vez.
@@ -212,6 +217,87 @@ public class SongService {
             String message = e.getMessage();
             update(id, s -> s.withWordsState(Song.WORDS_FAILED, message));
         }
+    }
+
+    // limites contra payloads absurdos (o editor manda a letra inteira de uma vez)
+    private static final int MAX_LINES = 2000;
+    private static final int MAX_WORDS_PER_LINE = 150;
+    private static final int MAX_TEXT = 600;
+    private static final double MIN_TIME = -60.0;     // o ajuste de sincronia pode empurrar para antes de zero
+    private static final double MAX_TIME = 36000.0;
+
+    /**
+     * Grava palavras criadas à mão (editor de sincronia). Vazio se a música não existe;
+     * IllegalStateException se não dá para salvar agora; IllegalArgumentException se o conteúdo é inválido.
+     */
+    public Optional<Song> saveWords(String id, WordsFile body) {
+        Song song = songs.get(id);
+        if (song == null) {
+            return Optional.empty();
+        }
+        if (Song.WORDS_RUNNING.equals(song.wordsState())) {
+            throw new IllegalStateException("O alinhamento automático ainda está rodando. Aguarde terminar.");
+        }
+        if (!song.files().containsKey("lyrics")) {
+            throw new IllegalStateException("Escolha uma letra sincronizada antes");
+        }
+        validateWords(body);
+
+        String language = body.language() != null && body.language().matches("[a-z]{2,3}") ? body.language() : "pt";
+        WordsFile clean = new WordsFile(1, language, "manual", body.lines());
+
+        Path dir = root.resolve(id);
+        Path tmp = dir.resolve("words.json.tmp");
+        Path target = dir.resolve("words.json");
+        try {
+            compactMapper.writeValue(tmp.toFile(), clean);
+            try { // troca atômica: o player nunca lê o arquivo pela metade
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return update(id, s -> s.withWordsReady("words.json"));
+    }
+
+    private static void validateWords(WordsFile file) {
+        if (file == null || file.lines() == null || file.lines().isEmpty() || file.lines().size() > MAX_LINES) {
+            throw new IllegalArgumentException("Lista de linhas inválida");
+        }
+        int n = 0;
+        for (WordsFile.Line line : file.lines()) {
+            n++;
+            if (line == null || !validTime(line.t()) || line.text() == null || line.text().isBlank()
+                    || line.text().length() > MAX_TEXT) {
+                throw new IllegalArgumentException("Linha " + n + " inválida");
+            }
+            if (!line.aligned()) {
+                if (line.words() != null && !line.words().isEmpty()) {
+                    throw new IllegalArgumentException("Linha " + n + ": só linhas completas levam palavras");
+                }
+                continue;
+            }
+            String[] tokens = line.text().strip().split("(?U)\\s+");
+            List<WordsFile.Word> words = line.words();
+            if (words == null || words.size() != tokens.length || words.size() > MAX_WORDS_PER_LINE) {
+                throw new IllegalArgumentException("Linha " + n + ": as palavras não batem com o texto");
+            }
+            double previousStart = Double.NEGATIVE_INFINITY;
+            for (int k = 0; k < words.size(); k++) {
+                WordsFile.Word w = words.get(k);
+                if (w == null || !tokens[k].equals(w.w()) || !validTime(w.s()) || !validTime(w.e())
+                        || w.e() < w.s() || w.s() < previousStart) {
+                    throw new IllegalArgumentException("Linha " + n + ": palavra " + (k + 1) + " com tempo inválido");
+                }
+                previousStart = w.s();
+            }
+        }
+    }
+
+    private static boolean validTime(double t) {
+        return Double.isFinite(t) && t >= MIN_TIME && t <= MAX_TIME;
     }
 
     public Optional<Song> setLyricsOffset(String id, int offsetMs) {

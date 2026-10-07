@@ -238,6 +238,7 @@ function openWordsDialog(song) {
   $("words-lang").value = store.get("wordsLang", "pt");
   const running = song.wordsState === "RUNNING";
   $("words-go").disabled = running;
+  $("words-manual").disabled = running; // o automático ainda vai gravar o words.json: espere terminar
   $("words-go").textContent = song.files.words ? "Refazer palavras" : "Sincronizar palavras";
   setStatus("words-status", running
     ? "Sincronizando… pode levar alguns minutos. Você pode fechar esta janela."
@@ -258,6 +259,14 @@ $("words-go").addEventListener("click", async () => {
     setStatus("words-status", e.message, true);
     $("words-go").disabled = false;
   }
+});
+
+$("words-manual").addEventListener("click", async () => {
+  const song = dialogSong;
+  $("dlg-words").close();
+  if (!current || current.id !== song.id || !audio.buffers.lead) await loadSong(song);
+  if (!current || current.id !== song.id || !audio.buffers.lead) return; // falhou ao carregar: o erro aparece no player
+  openEditor();
 });
 
 /* ============================================================
@@ -390,12 +399,13 @@ const audio = {
   offset: 0,      // posição (s) quando pausado
   startedAt: 0,   // ctx.currentTime - posição, quando tocando
   playing: false, raf: 0,
+  rate: 1,        // velocidade de reprodução (o editor de sincronia toca em câmera lenta)
 };
 let seeking = false;
-const seeks = [$("seek"), $("st-seek")];
+const seeks = [$("seek"), $("st-seek"), $("ed-seek")];
 
 function position() {
-  return audio.playing ? audio.ctx.currentTime - audio.startedAt : audio.offset;
+  return audio.playing ? (audio.ctx.currentTime - audio.startedAt) * audio.rate : audio.offset;
 }
 
 function stopSources() {
@@ -410,7 +420,7 @@ function stopSources() {
 function setPlayIcons() {
   const icon = audio.playing ? "❚❚" : "▶";
   const label = audio.playing ? "Pausar" : "Tocar";
-  for (const id of ["play", "st-play"]) {
+  for (const id of ["play", "st-play", "ed-play"]) {
     $(id).textContent = icon;
     $(id).setAttribute("aria-label", label);
   }
@@ -420,6 +430,7 @@ function setSeekValues(pos) { for (const s of seeks) s.value = pos; }
 function setTimeLabels(pos) {
   $("time").textContent = fmt(pos);
   $("st-time").textContent = `${fmt(pos)} / ${fmt(audio.duration)}`;
+  $("ed-time").textContent = `${fmt(pos)} / ${fmt(audio.duration)}`;
 }
 
 function startPlayback(from) {
@@ -430,11 +441,12 @@ function startPlayback(from) {
     const src = ctx.createBufferSource();
     src.buffer = audio.buffers[name];
     src.connect(audio.gains[name]);
+    src.playbackRate.value = audio.rate;
     src.start(when, from);
     audio.sources.push(src);
   }
   audio.sources[0].onended = onEnded;
-  audio.startedAt = when - from;
+  audio.startedAt = when - from / audio.rate;
   audio.playing = true;
   setPlayIcons();
   tick();
@@ -468,6 +480,7 @@ function tick() {
     setTimeLabels(pos);
   }
   renderLyrics(pos);
+  renderEditor(pos);
   audio.raf = requestAnimationFrame(tick);
 }
 
@@ -483,8 +496,12 @@ function seekTo(to) {
   audio.offset = to;
   setSeekValues(to);
   setTimeLabels(to);
+  ed.stopAt = null;
   if (audio.playing) startPlayback(to);
-  else renderLyrics(to);
+  else {
+    renderLyrics(to);
+    renderEditor(to);
+  }
 }
 
 $("play").addEventListener("click", togglePlay);
@@ -496,6 +513,7 @@ for (const s of seeks) {
     for (const other of seeks) if (other !== s) other.value = v;
     setTimeLabels(v);
     renderLyrics(v);
+    renderEditor(v);
   });
   s.addEventListener("change", () => {
     seeking = false;
@@ -549,13 +567,14 @@ async function loadSong(song) {
     setTimeLabels(0);
     setStatus("player-status", "");
     restoreMix(song);
-    applyAssets();
+    await applyAssets(); // o editor de sincronia precisa da letra já carregada
   } catch (e) {
     setStatus("player-status", e.message || "Erro ao carregar a música.", true);
   }
 }
 
 function unloadSong() {
+  closeEditor(true);
   closeStage();
   stopSources();
   cancelAnimationFrame(audio.raf);
@@ -652,17 +671,33 @@ const normText = (text) => text.toLowerCase().replace(/\s+/g, " ").trim();
 
 /** Liga as palavras alinhadas (words.json) às linhas do LRC pelo tempo da linha. */
 function attachWords(data) {
-  if (!data || !Array.isArray(data.lines)) return;
-  const byTime = new Map();
-  for (const line of data.lines) {
-    if (line.aligned && Array.isArray(line.words) && line.words.length) {
-      byTime.set(Math.round(line.t * 1000), line);
+  if (data && Array.isArray(data.lines)) {
+    const byTime = new Map();
+    for (const line of data.lines) {
+      if (line.aligned && Array.isArray(line.words) && line.words.length) {
+        byTime.set(Math.round(line.t * 1000), line);
+      }
+    }
+    for (const l of lyrics) {
+      const hit = byTime.get(Math.round(l.t * 1000));
+      // se o texto não bate, a letra mudou depois do alinhamento: essa linha fica com o preenchimento estimado
+      if (hit && normText(hit.text) === normText(l.text)) l.words = hit.words;
     }
   }
+  assignActivation();
+}
+
+/**
+ * Quando cada linha "entra" na tela: o tempo do LRC ou, se as palavras começam antes dele
+ * (cantor adiantado, ou palavras marcadas à mão), o início da primeira palavra.
+ * Sempre em ordem crescente, que é o que a busca binária do findLine precisa.
+ */
+function assignActivation() {
+  let previous = -Infinity;
   for (const l of lyrics) {
-    const hit = byTime.get(Math.round(l.t * 1000));
-    // se o texto não bate, a letra mudou depois do alinhamento: essa linha fica com o preenchimento estimado
-    if (hit && normText(hit.text) === normText(l.text)) l.words = hit.words;
+    const a = l.words ? Math.min(l.t, l.words[0].s) : l.t;
+    l.a = Math.max(a, previous);
+    previous = l.a;
   }
 }
 
@@ -700,7 +735,7 @@ function findLine(t) {
   let lo = 0, hi = lyrics.length - 1, ans = -1;
   while (lo <= hi) {
     const mid = (lo + hi) >> 1;
-    if (lyrics[mid].t <= t) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
+    if ((lyrics[mid].a ?? lyrics[mid].t) <= t) { ans = mid; lo = mid + 1; } else { hi = mid - 1; }
   }
   return ans;
 }
@@ -945,6 +980,547 @@ document.addEventListener("keydown", (e) => {
     seekTo(position() - 5);
   }
 });
+
+/* ============================================================
+   Editor de sincronia manual (palavra a palavra)
+
+   Os tempos ficam no mesmo referencial da tela de karaokê (já descontado o ajuste de sincronia da letra),
+   então o que você vê tocando aqui é o que a tela mostra depois de salvar.
+   ============================================================ */
+const ed = {
+  open: false,
+  sig: "",
+  lines: [],            // [{ t, text, words: [{ w, s, e, tap }] }]
+  li: 0, wi: 0,         // palavra selecionada: onde o próximo toque grava
+  holding: false,
+  holdTrue: 0,          // posição do áudio quando o toque começou
+  rows: [], chips: [],
+  playingRow: -1,
+  reactionMs: store.get("edReactionMs", 120),
+  stopAt: null,         // posição do áudio (s) em que o "ouvir linha" para
+  dirty: false,
+  voiceOn: true,
+  mixBefore: null,
+  draftTimer: null,
+};
+const TAP_MAX_HELD = 0.18;  // segurou menos que isto (s em tempo real) = toque curto
+const TAP_MAX_LEN = 1.5;    // toque curto: a palavra dura até a próxima, no máximo isto
+const TAP_LAST_LEN = 0.6;   // toque curto na última palavra da linha
+
+const toFrame = (pos) => pos - offsetMs / 1000;   // áudio -> referencial da tela de karaokê
+const toTrue = (t) => t + offsetMs / 1000;        // o inverso
+const reactionMedia = () => (ed.reactionMs / 1000) * audio.rate;
+const roundMs = (x) => Math.round(x * 1000) / 1000;
+const isTimed = (w) => w.s != null && w.e != null;
+const edLine = () => ed.lines[ed.li];
+const edWord = () => (ed.lines[ed.li] ? ed.lines[ed.li].words[ed.wi] : null);
+const reduceMotion = () => !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+function edStatus(message, isError = false) { setStatus("ed-status", message, isError); }
+
+function setRate(rate) {
+  const pos = position();
+  audio.rate = rate;
+  if (audio.playing) startPlayback(pos); // recomeça do mesmo ponto na nova velocidade
+}
+
+/* ---------- dados ---------- */
+function edLinesFromLyrics() {
+  return lyrics.filter((l) => l.text).map((l) => {
+    const tokens = l.text.split(/\s+/);
+    const known = l.words && l.words.length === tokens.length ? l.words : null; // palavras já alinhadas (Whisper ou antes)
+    return {
+      t: l.t,
+      text: l.text,
+      words: tokens.map((w, k) => ({ w, s: known ? known[k].s : null, e: known ? known[k].e : null, tap: false })),
+    };
+  });
+}
+
+/** Ajusta a duração das palavras. Toque curto dura até a próxima; nunca invade a seguinte. */
+function normalizeLine(line) {
+  const ws = line.words;
+  for (let k = 0; k < ws.length; k++) {
+    const w = ws[k];
+    if (w.s == null) continue;
+    let next = null;
+    for (let j = k + 1; j < ws.length; j++) {
+      if (ws[j].s != null) { next = ws[j].s; break; }
+    }
+    if (w.tap || w.e == null) {
+      w.e = next != null ? Math.min(next - 0.02, w.s + TAP_MAX_LEN) : w.s + TAP_LAST_LEN;
+    } else if (next != null && w.e > next) {
+      w.e = next;
+    }
+    if (w.e < w.s + 0.05) w.e = w.s + 0.05;
+    w.s = roundMs(w.s);
+    w.e = roundMs(w.e);
+  }
+}
+
+/* ---------- rascunho (não perde o trabalho se fechar a aba) ---------- */
+function lyricsSignature() {
+  const text = lyrics.filter((l) => l.text).map((l) => `${Math.round(l.t * 1000)}|${l.text}`).join("\n");
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) | 0;
+  return `${lyrics.length}:${h}`;
+}
+const draftKey = () => `wordsDraft:${current.id}`;
+
+function saveDraftNow() {
+  clearTimeout(ed.draftTimer);
+  if (!ed.open || !ed.dirty || !current) return;
+  store.set(draftKey(), {
+    sig: ed.sig,
+    lines: ed.lines.map((l) => l.words.map((w) => [w.s, w.e, w.tap ? 1 : 0])),
+  });
+}
+
+function applyDraft(draft) {
+  if (!draft || draft.sig !== ed.sig || !Array.isArray(draft.lines) || draft.lines.length !== ed.lines.length) return false;
+  for (let i = 0; i < ed.lines.length; i++) {
+    const saved = draft.lines[i];
+    if (!Array.isArray(saved) || saved.length !== ed.lines[i].words.length) return false;
+  }
+  draft.lines.forEach((saved, i) => saved.forEach(([s, e, tap], k) => {
+    Object.assign(ed.lines[i].words[k], { s, e, tap: !!tap });
+  }));
+  return true;
+}
+
+function edTouch() {
+  ed.dirty = true;
+  clearTimeout(ed.draftTimer);
+  ed.draftTimer = setTimeout(saveDraftNow, 400);
+  edUpdateSummary();
+  renderEditor(position());
+}
+
+/* ---------- abrir / fechar ---------- */
+function openEditor() {
+  if (!current || !audio.buffers.lead) return;
+  ed.lines = edLinesFromLyrics();
+  if (!ed.lines.length) {
+    setStatus("player-status", "Esta música não tem letra para sincronizar.", true);
+    return;
+  }
+  ed.sig = lyricsSignature();
+  const resumed = applyDraft(store.get(draftKey(), null));
+  ed.dirty = resumed;
+
+  // começa na primeira palavra ainda sem tempo
+  ed.li = 0;
+  ed.wi = 0;
+  outer: for (let li = 0; li < ed.lines.length; li++) {
+    for (let wi = 0; wi < ed.lines[li].words.length; wi++) {
+      if (!isTimed(ed.lines[li].words[wi])) { ed.li = li; ed.wi = wi; break outer; }
+    }
+  }
+
+  ed.mixBefore = { mix: { ...mix }, preset: activePreset };
+  setPreset("original"); // para sincronizar é preciso ouvir o cantor
+  ed.voiceOn = true;
+  ed.stopAt = null;
+  ed.holding = false;
+  ed.playingRow = -1;
+  ed.open = true;
+
+  $("editor").hidden = false;
+  document.body.classList.add("stage-open"); // trava a rolagem da página de trás
+  $("ed-title").textContent = `Sincronizar: ${current.title}`;
+  $("ed-reaction").value = ed.reactionMs;
+  $("out-reaction").textContent = `${ed.reactionMs} ms`;
+  $("ed-rate").value = "1";
+  setRate(1);
+  updateVoiceButton();
+  $("ed-discard").hidden = !resumed;
+  buildEditorDom();
+  edSelect(ed.li, ed.wi);
+  edUpdateSummary();
+  edStatus(resumed ? "Rascunho retomado (ainda não salvo)." : "");
+  renderEditor(position());
+}
+
+function closeEditor(force = false) {
+  if (!ed.open) return true;
+  if (!force && ed.dirty
+      && !confirm("Há alterações não salvas. Sair assim mesmo?\n(O rascunho fica guardado neste navegador.)")) {
+    return false;
+  }
+  saveDraftNow();
+  if (audio.playing) pausePlayback();
+  ed.holding = false;
+  ed.stopAt = null;
+  ed.open = false;
+  $("editor").hidden = true;
+  document.body.classList.remove("stage-open");
+  setRate(1);
+  if (ed.mixBefore) {
+    Object.assign(mix, ed.mixBefore.mix);
+    activePreset = ed.mixBefore.preset;
+    ed.mixBefore = null;
+    applyMix();
+  }
+  return true;
+}
+
+function edDiscardDraft() {
+  if (!confirm("Descartar o rascunho e voltar ao que está salvo?")) return;
+  store.set(draftKey(), null);
+  ed.lines = edLinesFromLyrics();
+  ed.dirty = false;
+  ed.li = 0;
+  ed.wi = 0;
+  $("ed-discard").hidden = true;
+  buildEditorDom();
+  edSelect(0, 0);
+  edUpdateSummary();
+  edStatus("Rascunho descartado.");
+}
+
+/* ---------- tela ---------- */
+function buildEditorDom() {
+  const list = $("ed-lines");
+  list.replaceChildren();
+  ed.rows = [];
+  ed.chips = [];
+  ed.lines.forEach((line, li) => {
+    const go = el("button", {
+      className: "ed-go", type: "button", title: "Tocar daqui", "aria-label": `Tocar a partir da linha ${li + 1}`,
+      onclick: () => edPlayFromLine(li),
+    }, `⏵ ${fmt(line.t)}`);
+    const chips = line.words.map((w, wi) => el("button", {
+      className: "cw", type: "button", onclick: () => edSelect(li, wi, false),
+    }, w.w));
+    const row = el("li", { className: "ed-line" }, go, el("div", { className: "ed-words" }, ...chips),
+      el("span", { className: "ed-mark", "aria-hidden": "true" }));
+    list.append(row);
+    ed.rows.push(row);
+    ed.chips.push(chips);
+  });
+  ed.lines.forEach((_, li) => edRefreshLine(li));
+}
+
+function edRefreshChip(li, wi) {
+  const chip = ed.chips[li] && ed.chips[li][wi];
+  if (!chip) return;
+  const w = ed.lines[li].words[wi];
+  const recording = ed.holding && li === ed.li && wi === ed.wi;
+  chip.classList.toggle("timed", isTimed(w));
+  chip.classList.toggle("untimed", !isTimed(w) && !recording);
+  chip.classList.toggle("cursor", li === ed.li && wi === ed.wi);
+  chip.classList.toggle("rec", recording);
+  chip._st = null; // força recalcular o estado de reprodução
+  chip.title = isTimed(w) ? `${w.s.toFixed(2)} s → ${w.e.toFixed(2)} s` : "sem tempo";
+}
+
+function edRefreshLine(li) {
+  ed.lines[li].words.forEach((_, wi) => edRefreshChip(li, wi));
+  ed.rows[li].classList.toggle("complete", ed.lines[li].words.every(isTimed));
+}
+
+function edUpdateSummary() {
+  const done = ed.lines.filter((l) => l.words.every(isTimed)).length;
+  $("ed-summary").textContent = `${done} de ${ed.lines.length} linhas completas${ed.dirty ? " · alterações não salvas" : ""}`;
+}
+
+function edUpdateWordInfo() {
+  const w = edWord();
+  $("ed-word-info").textContent = !w
+    ? "—"
+    : isTimed(w) ? `“${w.w}”  início ${w.s.toFixed(2)} s · fim ${w.e.toFixed(2)} s` : `“${w.w}”  sem tempo`;
+  for (const b of $("ed-nudges").querySelectorAll("button")) b.disabled = !(w && isTimed(w));
+}
+
+function edSelect(li, wi, scroll = true) {
+  const prev = { li: ed.li, wi: ed.wi };
+  ed.li = li;
+  ed.wi = wi;
+  edRefreshChip(prev.li, prev.wi);
+  edRefreshChip(li, wi);
+  ed.rows.forEach((row, i) => row.classList.toggle("current", i === li));
+  edUpdateWordInfo();
+  if (scroll && ed.rows[li] && ed.rows[li].scrollIntoView) {
+    ed.rows[li].scrollIntoView({ block: "center", behavior: reduceMotion() ? "auto" : "smooth" });
+  }
+}
+
+function edMove(dWord, dLine) {
+  if (dLine) {
+    edSelect(Math.max(0, Math.min(ed.lines.length - 1, ed.li + dLine)), 0);
+    return;
+  }
+  let li = ed.li;
+  let wi = ed.wi + dWord;
+  if (wi < 0) {
+    if (li === 0) return;
+    li--;
+    wi = ed.lines[li].words.length - 1;
+  } else if (wi >= ed.lines[li].words.length) {
+    if (li + 1 >= ed.lines.length) return;
+    li++;
+    wi = 0;
+  }
+  edSelect(li, wi);
+}
+
+/** Acompanha a reprodução: pinta cada palavra marcada e destaca a linha que está tocando. */
+function renderEditor(pos) {
+  if (!ed.open) return;
+  if (ed.stopAt != null && audio.playing && pos >= ed.stopAt) {
+    ed.stopAt = null;
+    pausePlayback();
+  }
+  const t = toFrame(pos);
+
+  let active = -1;
+  for (let li = 0; li < ed.lines.length; li++) {
+    const line = ed.lines[li];
+    const first = line.words.find(isTimed);
+    const start = first ? Math.min(first.s, line.t) : line.t;
+    if (start <= t) active = li; else break;
+  }
+  if (active !== ed.playingRow) {
+    if (ed.rows[ed.playingRow]) ed.rows[ed.playingRow].classList.remove("playing");
+    if (ed.rows[active]) ed.rows[active].classList.add("playing");
+    ed.playingRow = active;
+  }
+
+  for (let li = 0; li < ed.lines.length; li++) {
+    const words = ed.lines[li].words;
+    const chips = ed.chips[li];
+    for (let wi = 0; wi < words.length; wi++) {
+      const w = words[wi];
+      if (!isTimed(w)) continue;
+      let state;
+      let pct = 0;
+      if (t < w.s) state = "todo";
+      else if (t >= w.e) state = "done";
+      else { state = "now"; pct = Math.round(((t - w.s) / (w.e - w.s)) * 100); }
+      const chip = chips[wi];
+      if (chip._st !== state) {
+        chip.classList.remove("todo", "now", "done");
+        chip.classList.add(state);
+        chip._st = state;
+      }
+      if (state === "now" && chip._p !== pct) {
+        chip.style.setProperty("--wp", `${pct}%`);
+        chip._p = pct;
+      }
+    }
+  }
+}
+
+/* ---------- captura ---------- */
+function edPress() {
+  if (!ed.open || ed.holding) return;
+  if (!audio.playing) {
+    edStatus("Dê play (tecla P) e segure Espaço enquanto a palavra é cantada.");
+    return;
+  }
+  const w = edWord();
+  if (!w) return;
+  ed.holding = true;
+  ed.holdTrue = position() - reactionMedia();
+  w.s = roundMs(toFrame(ed.holdTrue));
+  w.e = null;
+  w.tap = false;
+  $("ed-pad").classList.add("down");
+  edRefreshChip(ed.li, ed.wi);
+}
+
+function edRelease() {
+  if (!ed.holding) return;
+  ed.holding = false;
+  $("ed-pad").classList.remove("down");
+  const w = edWord();
+  const endTrue = position() - reactionMedia();
+  const heldReal = (endTrue - ed.holdTrue) / audio.rate;
+  if (heldReal < TAP_MAX_HELD) {
+    w.tap = true;       // toque curto: a duração sai de normalizeLine
+    w.e = null;
+  } else {
+    w.tap = false;
+    w.e = roundMs(toFrame(endTrue));
+  }
+  normalizeLine(edLine());
+  edTouch();
+  edRefreshLine(ed.li);
+  edStatus("");
+  // avança para a próxima palavra (e para a próxima linha, ao fim desta)
+  const line = edLine();
+  if (ed.wi + 1 < line.words.length) edSelect(ed.li, ed.wi + 1);
+  else if (ed.li + 1 < ed.lines.length) edSelect(ed.li + 1, 0);
+  else edSelect(ed.li, ed.wi);
+}
+
+/* ---------- ajustes ---------- */
+function edNudge(field, delta) {
+  const w = edWord();
+  if (!w || !isTimed(w)) return;
+  if (field === "s") w.s = roundMs(Math.min(w.s + delta, w.e - 0.05));
+  else w.e = roundMs(Math.max(w.e + delta, w.s + 0.05));
+  w.tap = false;
+  edTouch();
+  edRefreshChip(ed.li, ed.wi);
+  edUpdateWordInfo();
+}
+
+function edShiftLine(delta) {
+  for (const w of edLine().words) {
+    if (isTimed(w)) { w.s = roundMs(w.s + delta); w.e = roundMs(w.e + delta); }
+  }
+  edTouch();
+  edRefreshLine(ed.li);
+  edUpdateWordInfo();
+}
+
+function edClearLine() {
+  for (const w of edLine().words) { w.s = null; w.e = null; w.tap = false; }
+  edTouch();
+  edRefreshLine(ed.li);
+  edSelect(ed.li, 0);
+}
+
+async function edPlayAt(pos) {
+  await audio.ctx.resume();
+  audio.offset = Math.max(0, Math.min(audio.duration, pos));
+  startPlayback(audio.offset);
+}
+
+async function edPlayFromLine(li) {
+  edSelect(li, 0, false);
+  const line = ed.lines[li];
+  const first = line.words.find(isTimed);
+  ed.stopAt = null;
+  await edPlayAt(toTrue(first ? first.s : line.t) - 1.5);
+}
+
+async function edListenLine() {
+  const line = edLine();
+  const timed = line.words.filter(isTimed);
+  const from = toTrue(timed.length ? timed[0].s : line.t);
+  const to = timed.length ? toTrue(timed[timed.length - 1].e) : from + 6;
+  await edPlayAt(from - 0.7);
+  ed.stopAt = to + 0.4; // depois do play, que zera o controle
+}
+
+/* ---------- salvar ---------- */
+/** Primeira linha com palavras fora de ordem, ou -1. */
+function edProblem() {
+  for (let li = 0; li < ed.lines.length; li++) {
+    const timed = ed.lines[li].words.filter(isTimed);
+    for (let k = 1; k < timed.length; k++) if (timed[k].s < timed[k - 1].s) return li;
+  }
+  return -1;
+}
+
+function edPayload() {
+  for (const line of ed.lines) normalizeLine(line);
+  return {
+    language: store.get("wordsLang", "pt"),
+    lines: ed.lines.map((l) => (l.words.every(isTimed)
+      ? { t: l.t, text: l.text, aligned: true, words: l.words.map((w) => ({ w: w.w, s: roundMs(w.s), e: roundMs(w.e) })) }
+      : { t: l.t, text: l.text, aligned: false })),
+  };
+}
+
+async function edSave() {
+  const bad = edProblem();
+  if (bad >= 0) {
+    edSelect(bad, 0);
+    edStatus(`A linha ${bad + 1} tem palavras fora de ordem. Marque de novo, ou use “Limpar linha”.`, true);
+    return;
+  }
+  const payload = edPayload();
+  const complete = payload.lines.filter((l) => l.aligned).length;
+  $("ed-save").disabled = true;
+  edStatus("Salvando…");
+  try {
+    replaceSong(await putJson(`${API}/${current.id}/words`, payload));
+    ed.dirty = false;
+    store.set(draftKey(), null);
+    $("ed-discard").hidden = true;
+    edUpdateSummary();
+    edStatus(`Salvo: ${complete} de ${payload.lines.length} linhas com palavras. As demais usam o preenchimento estimado.`);
+  } catch (e) {
+    edStatus(e.message || "Não foi possível salvar.", true);
+  } finally {
+    $("ed-save").disabled = false;
+  }
+}
+
+/* ---------- ligações ---------- */
+function updateVoiceButton() {
+  const b = $("ed-voice");
+  b.setAttribute("aria-pressed", String(ed.voiceOn));
+  b.textContent = ed.voiceOn ? "Voz do cantor: ligada" : "Voz do cantor: desligada";
+}
+
+for (const [field, label] of [["s", "Início"], ["e", "Fim"]]) {
+  const group = el("div", { className: "nudge" }, el("span", {}, label));
+  for (const delta of [-0.1, -0.05, 0.05, 0.1]) {
+    const text = `${delta > 0 ? "+" : "−"}${String(Math.abs(delta)).replace(".", ",")}`;
+    group.append(el("button", { className: "chip", type: "button", onclick: () => edNudge(field, delta) }, text));
+  }
+  $("ed-nudges").append(group);
+}
+
+$("ed-play").addEventListener("click", () => { ed.stopAt = null; togglePlay(); });
+$("ed-save").addEventListener("click", edSave);
+$("ed-close").addEventListener("click", () => closeEditor());
+$("ed-discard").addEventListener("click", edDiscardDraft);
+$("ed-listen").addEventListener("click", edListenLine);
+$("ed-shift-back").addEventListener("click", () => edShiftLine(-0.1));
+$("ed-shift-fwd").addEventListener("click", () => edShiftLine(0.1));
+$("ed-clear").addEventListener("click", edClearLine);
+$("ed-rate").addEventListener("change", (e) => setRate(Number(e.target.value)));
+$("ed-reaction").addEventListener("input", (e) => {
+  ed.reactionMs = Number(e.target.value);
+  $("out-reaction").textContent = `${ed.reactionMs} ms`;
+  store.set("edReactionMs", ed.reactionMs);
+});
+$("ed-voice").addEventListener("click", () => {
+  ed.voiceOn = !ed.voiceOn;
+  setPreset(ed.voiceOn ? "original" : "karaoke");
+  updateVoiceButton();
+});
+
+const pad = $("ed-pad");
+pad.addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  if (pad.setPointerCapture) pad.setPointerCapture(e.pointerId);
+  edPress();
+});
+for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) pad.addEventListener(type, edRelease);
+
+document.addEventListener("keydown", (e) => {
+  if (!ed.open) return;
+  const tag = e.target.tagName;
+  const onRange = tag === "INPUT" && e.target.type === "range";
+  const onSelect = tag === "SELECT";
+  if (e.code === "Space" && !onSelect) {
+    e.preventDefault();
+    if (!e.repeat) edPress();
+  } else if (onSelect) {
+    // deixa as setas e o Enter para o seletor de velocidade
+  } else if (e.key === "Escape") {
+    closeEditor();
+  } else if (e.key === "p" || e.key === "P") {
+    ed.stopAt = null;
+    togglePlay();
+  } else if (!onRange && e.key === "ArrowRight") { e.preventDefault(); edMove(1, 0); }
+  else if (!onRange && e.key === "ArrowLeft") { e.preventDefault(); edMove(-1, 0); }
+  else if (e.key === "ArrowDown") { e.preventDefault(); edMove(0, 1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); edMove(0, -1); }
+});
+document.addEventListener("keyup", (e) => {
+  if (ed.open && e.code === "Space" && e.target.tagName !== "SELECT") {
+    e.preventDefault(); // evita "clicar" no botão focado ao soltar o espaço
+    edRelease();
+  }
+});
+window.addEventListener("pagehide", saveDraftNow);
 
 /* ============================================================
    Início

@@ -3,6 +3,7 @@ C:\Users\diego\OneDrive\Documentos\karaoke-flow\backend\src\main\java\dev\karaok
 C:\Users\diego\OneDrive\Documentos\karaoke-flow\backend\src\main\java\dev\karaoke\KaraokeApplication.java
 C:\Users\diego\OneDrive\Documentos\karaoke-flow\backend\src\main\java\dev\karaoke\model\Song.java
 C:\Users\diego\OneDrive\Documentos\karaoke-flow\backend\src\main\java\dev\karaoke\model\SongStatus.java
+C:\Users\diego\OneDrive\Documentos\karaoke-flow\backend\src\main\java\dev\karaoke\model\WordsFile.java
 C:\Users\diego\OneDrive\Documentos\karaoke-flow\backend\src\main\java\dev\karaoke\service\ItunesClient.java
 C:\Users\diego\OneDrive\Documentos\karaoke-flow\backend\src\main\java\dev\karaoke\service\LrclibClient.java
 C:\Users\diego\OneDrive\Documentos\karaoke-flow\backend\src\main\java\dev\karaoke\service\SeparatorClient.java

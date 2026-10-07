@@ -86,6 +86,13 @@
     der certo) a tela usa o preenchimento estimado por linha. Trocar a letra descarta as palavras.</p>
   <div class="status" id="words-status" role="status"></div>
   <button class="btn" id="words-go" type="button">Sincronizar palavras</button>
+
+  <div class="or-sep" role="separator"><span>ou</span></div>
+
+  <p><strong>Sincronizar manualmente.</strong> Para quando o automático errar ou não funcionar: você marca o tempo
+    de cada palavra tocando no ritmo da música (em câmera lenta, se precisar). Também serve para corrigir só as
+    linhas que ficaram ruins.</p>
+  <button class="btn ghost" id="words-manual" type="button">Abrir editor de sincronia</button>
 </dialog>
 
 <!-- ===== diálogo: escolher capa ===== -->
@@ -163,6 +170,75 @@
       <p class="hint" id="sync-info"></p>
     </section>
   </aside>
+</div>
+
+<!-- ===== editor de sincronia manual ===== -->
+<div class="editor" id="editor" hidden role="dialog" aria-modal="true" aria-label="Editor de sincronia das palavras">
+  <header class="ed-top">
+    <div class="ed-heading">
+      <h2 id="ed-title">Sincronizar palavras</h2>
+      <p class="hint" id="ed-summary"></p>
+    </div>
+    <div class="ed-actions">
+      <button class="btn ghost" id="ed-discard" type="button" hidden>Descartar rascunho</button>
+      <button class="btn" id="ed-save" type="button">Salvar</button>
+      <button class="btn ghost" id="ed-close" type="button">Fechar</button>
+    </div>
+  </header>
+
+  <details class="ed-howto" open>
+    <summary>Como usar</summary>
+    <ol>
+      <li>Dê play (tecla <kbd>P</kbd>). Use <strong>0,5×</strong> se estiver difícil acompanhar.</li>
+      <li><strong>Segure <kbd>Espaço</kbd></strong> (ou o botão grande) enquanto a palavra marcada é cantada e solte
+        quando ela termina. Um toque rápido também vale: a palavra dura até a próxima.</li>
+      <li>Errou? Clique na palavra (ou use as setas) e marque de novo. <strong>Tocar daqui</strong> volta a música
+        para antes da linha.</li>
+      <li><strong>Ouvir linha</strong> mostra como ficou. O <strong>ajuste fino</strong> corrige em centésimos de segundo.</li>
+      <li>Linhas que você não completar continuam com o preenchimento estimado. Depois é só <strong>Salvar</strong>.</li>
+    </ol>
+  </details>
+
+  <ol class="ed-lines" id="ed-lines"></ol>
+
+  <footer class="ed-controls">
+    <div class="ed-row ed-transport">
+      <button class="play small" id="ed-play" type="button" aria-label="Tocar">▶</button>
+      <input type="range" id="ed-seek" min="0" max="0" step="0.1" value="0" aria-label="Posição da música">
+      <span class="time" id="ed-time">0:00 / 0:00</span>
+    </div>
+
+    <div class="ed-row ed-options">
+      <label class="ed-opt">Velocidade
+        <select id="ed-rate">
+          <option value="1">1×</option>
+          <option value="0.75">0,75×</option>
+          <option value="0.5">0,5×</option>
+        </select>
+      </label>
+      <label class="ed-opt ed-grow">Atraso do seu toque <output id="out-reaction"></output>
+        <input type="range" id="ed-reaction" min="0" max="400" step="10" aria-label="Atraso de reação do toque">
+      </label>
+      <button class="chip" id="ed-voice" type="button" aria-pressed="true">Voz do cantor: ligada</button>
+    </div>
+
+    <div class="ed-row ed-fine">
+      <div class="ed-word" id="ed-word-info">—</div>
+      <div class="ed-nudges" id="ed-nudges"></div>
+    </div>
+
+    <div class="ed-row ed-capture">
+      <button class="tap-pad" id="ed-pad" type="button">Segure enquanto a palavra é cantada<small>ou segure Espaço</small></button>
+      <div class="ed-line-actions">
+        <button class="chip" id="ed-listen" type="button">Ouvir linha</button>
+        <button class="chip" id="ed-shift-back" type="button">Linha −0,1 s</button>
+        <button class="chip" id="ed-shift-fwd" type="button">Linha +0,1 s</button>
+        <button class="chip" id="ed-clear" type="button">Limpar linha</button>
+      </div>
+    </div>
+
+    <div class="status" id="ed-status" role="status"></div>
+  </footer>
 </div>
 
 <script src="app.js"></script>

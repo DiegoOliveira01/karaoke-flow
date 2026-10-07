@@ -19,6 +19,7 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
 
 import dev.karaoke.model.Song;
+import dev.karaoke.model.WordsFile;
 import dev.karaoke.service.ItunesClient;
 import dev.karaoke.service.LrclibClient;
 import dev.karaoke.service.SongService;
@@ -119,6 +120,18 @@ public class SongController {
         try {
             Song song = service.requestWords(id, language).orElseThrow(SongController::notFound);
             return ResponseEntity.status(HttpStatus.ACCEPTED).body(song);
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        }
+    }
+
+    /** Salva palavras sincronizadas à mão no editor (substitui as atuais, venham de onde vierem). */
+    @PutMapping("/{id}/words")
+    public Song saveWords(@PathVariable String id, @RequestBody WordsFile body) {
+        try {
+            return service.saveWords(id, body).orElseThrow(SongController::notFound);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
         } catch (IllegalStateException e) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
         }
