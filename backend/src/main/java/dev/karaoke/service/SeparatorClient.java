@@ -20,10 +20,7 @@ public class SeparatorClient {
     private final RestClient client;
 
     public SeparatorClient(KaraokeProperties props) {
-        var httpClient = HttpClient.newBuilder()
-                .version(HttpClient.Version.HTTP_1_1)   // <- linha nova
-                .connectTimeout(Duration.ofSeconds(5))
-                .build();
+        var httpClient = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(5)).build();
         var factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(props.separator().readTimeout());
         this.client = RestClient.builder()

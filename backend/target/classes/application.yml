@@ -1,5 +1,7 @@
 server:
   port: 8080
+  error:
+    include-message: always   # mensagens de erro amigáveis chegam ao navegador
 
 spring:
   servlet:
@@ -10,5 +12,7 @@ spring:
 karaoke:
   storage-dir: ./data/songs
   separator:
-    url: http://localhost:8001
+    url: http://127.0.0.1:8001
     read-timeout: 3h   # separar uma música pode demorar bastante sem GPU
+  itunes:
+    country: BR         # loja usada na busca de capas

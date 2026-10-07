@@ -2,6 +2,7 @@ package dev.karaoke.service;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -14,6 +15,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
 import org.slf4j.Logger;
@@ -105,8 +107,8 @@ public class SongService {
 
         String cleanTitle = (title == null || title.isBlank()) ? stripExtension(original) : title.trim();
         String cleanArtist = (artist == null || artist.isBlank()) ? "" : artist.trim();
-        Song song = new Song(id, cleanTitle, cleanArtist, SongStatus.QUEUED, null, Instant.now(), Map.of());
-        save(song);
+        Song song = new Song(id, cleanTitle, cleanArtist, SongStatus.QUEUED, null, Instant.now(), Map.of(), 0, 0);
+        persist(song);
         enqueue(song);
         return song;
     }
@@ -125,7 +127,44 @@ public class SongService {
         return true;
     }
 
-    // ------------------------------------------------------------------
+    // ---------------------------------------------------------------- letra / capa
+
+    public Optional<Song> attachLyrics(String id, String lrc) {
+        if (!songs.containsKey(id)) { // só ids conhecidos viram caminho de arquivo
+            return Optional.empty();
+        }
+        try {
+            Files.writeString(root.resolve(id).resolve("lyrics.lrc"), lrc, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return update(id, s -> s.withFile("lyrics", "lyrics.lrc"));
+    }
+
+    public Optional<Song> attachCover(String id, byte[] bytes, String extension) {
+        if (!songs.containsKey(id)) {
+            return Optional.empty();
+        }
+        Path dir = root.resolve(id);
+        String name = "cover." + extension;
+        try {
+            // remove capa antiga (pode ter outra extensão)
+            try (Stream<Path> old = Files.list(dir)) {
+                old.filter(p -> p.getFileName().toString().startsWith("cover.")).forEach(p -> p.toFile().delete());
+            }
+            Files.write(dir.resolve(name), bytes);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return update(id, s -> s.withFile("cover", name));
+    }
+
+    public Optional<Song> setLyricsOffset(String id, int offsetMs) {
+        int clamped = Math.max(-60_000, Math.min(60_000, offsetMs));
+        return update(id, s -> s.withLyricsOffset(clamped));
+    }
+
+    // ---------------------------------------------------------------- internos
 
     private void enqueue(Song song) {
         songs.put(song.id(), song);
@@ -133,31 +172,32 @@ public class SongService {
     }
 
     private void process(String id) {
-        Song song = songs.get(id);
-        if (song == null) {
+        if (!songs.containsKey(id)) {
             return; // apagada enquanto esperava na fila
         }
         Path dir = root.resolve(id);
         try {
-            save(song.withStatus(SongStatus.SEPARATING));
+            update(id, s -> s.withStatus(SongStatus.SEPARATING));
             Path input = findOriginal(dir);
             Map<String, String> files = separator.separate(input, dir);
-
-            Song current = songs.get(id);
-            if (current != null) { // pode ter sido apagada durante a separação
-                save(current.withReady(files));
-            }
+            update(id, s -> s.withReady(files));
         } catch (Exception e) {
             log.error("Falha ao processar {}", id, e);
-            Song current = songs.get(id);
-            if (current != null) {
-                save(current.withError(e.getMessage()));
-            }
+            update(id, s -> s.withError(e.getMessage()));
         }
     }
 
-    private void save(Song song) {
-        songs.put(song.id(), song);
+    /** Altera a música de forma atômica no mapa e grava o meta.json. Vazio se ela foi apagada. */
+    private Optional<Song> update(String id, UnaryOperator<Song> change) {
+        Song updated = songs.computeIfPresent(id, (k, current) -> change.apply(current));
+        if (updated != null) {
+            persist(updated);
+        }
+        return Optional.ofNullable(updated);
+    }
+
+    private void persist(Song song) {
+        songs.putIfAbsent(song.id(), song);
         Path dir = root.resolve(song.id());
         if (!Files.isDirectory(dir)) {
             return; // pasta apagada
