@@ -10,12 +10,19 @@ São duas passadas, como no vídeo do Funky:
   1) STEM_MODEL      separa voz x instrumental
   2) KARAOKE_MODEL   separa a voz em principal x backing
 
+Cada passada roda em um SUBPROCESSO Python isolado (worker.py). Quando o
+processo termina, o SO limpa toda a VRAM e o estado do ROCm/HIP associado
+a ele — sem isso, no Windows o ROCm acumula fragmentação entre trocas de
+modelo e a separação degrada para ~17 s/it depois de algumas músicas.
+
 Os nomes dos modelos são configuráveis por variável de ambiente.
 Para ver os disponíveis:  audio-separator --list_models
 """
 import json
 import os
 import shutil
+import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -33,57 +40,19 @@ OUTPUT_FORMAT = os.getenv("OUTPUT_FORMAT", "FLAC")
 ALIGN_MODEL = os.getenv("ALIGN_MODEL", "small")
 SCRATCH_DIR = Path(os.getenv("SCRATCH_DIR", "./scratch")).resolve()
 
+# Caminho absoluto do worker.py, ao lado deste main.py.
+_WORKER = Path(__file__).resolve().parent / "worker.py"
+
 app = FastAPI(title="Karaoke separator")
 
-# Uma GPU só: serializa as separações e reaproveita os modelos já carregados.
+# Uma GPU só: serializa as separações.
 _lock = threading.Lock()
-#_separators: dict = {}
-
-_separator = None
-_separator_model = None
-_separator_out = None
 
 
 class SeparateRequest(BaseModel):
     input_path: str
     output_dir: str
 
-
-def _get_separator(model_name: str):
-    global _separator, _separator_model, _separator_out
-
-    from audio_separator.separator import Separator
-    import gc
-    import torch
-
-    # Já está carregado.
-    if _separator is not None and _separator_model == model_name:
-        return _separator, _separator_out
-
-    # Se estamos trocando de modelo, libera o Separator anterior.
-    if _separator is not None:
-        _separator = None
-        _separator_model = None
-
-        gc.collect()
-
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-    # Cria um novo Separator para o modelo solicitado.
-    out = SCRATCH_DIR / "separator_output"
-    out.mkdir(parents=True, exist_ok=True)
-
-    _separator = Separator(
-        output_dir=str(out),
-        output_format=OUTPUT_FORMAT,
-    )
-
-    _separator.load_model(model_filename=model_name)
-    _separator_model = model_name
-    _separator_out = out
-
-    return _separator, _separator_out
 
 def _pick(files: list[Path], kind: str) -> Path:
     """Acha o arquivo de saída que tem '(Vocals)' ou '(Instrumental)' no nome."""
@@ -95,31 +64,58 @@ def _pick(files: list[Path], kind: str) -> Path:
     )
 
 
-def _run_pass(model_name: str, input_file: Path) -> tuple[Path, Path]:
-    sep, out_dir = _get_separator(model_name)
+def _run_pass(model_name: str, input_file: Path, out_dir: Path) -> tuple[Path, Path]:
+    """
+    Executa UMA passada de separação em um subprocesso isolado.
 
-    for old in out_dir.iterdir():
-        old.unlink()
+    O worker herda stdout/stderr do uvicorn, então o progresso do audio-separator
+    (barras, "Loading model", "Separation duration") aparece no mesmo console —
+    exatamente como aparecia antes, quando rodávamos in-process.
 
-    sep.separate(str(input_file))
+    Como cada passada tem sua própria sessão ROCm, ao final ela devolve 100% da
+    VRAM ao driver — que é o que evita a degradação entre músicas.
+    """
+    # Limpa a pasta de saída do worker antes de rodar.
+    if out_dir.exists():
+        for old in out_dir.iterdir():
+            if old.is_file():
+                old.unlink()
+    else:
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable,
+        str(_WORKER),
+        "--model", model_name,
+        "--input", str(input_file),
+        "--output", str(out_dir),
+        "--format", OUTPUT_FORMAT,
+    ]
+
+    print(f"[main] iniciando worker: model={model_name} input={input_file.name}", flush=True)
+    # Sem capture: o worker fala direto no console do uvicorn.
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"worker falhou (código {result.returncode}) para modelo {model_name}. "
+            f"Veja a saída acima do worker para o motivo."
+        )
+    print(f"[main] worker terminou: model={model_name}", flush=True)
 
     files = [p for p in out_dir.iterdir() if p.is_file()]
-
     return _pick(files, "vocals"), _pick(files, "instrumental")
 
 
 @app.get("/health")
 def health():
-    info = {"status": "ok", "stem_model": STEM_MODEL, "karaoke_model": KARAOKE_MODEL}
-    try:
-        import torch
-
-        info["gpu"] = torch.cuda.is_available()  # ROCm também aparece como "cuda"
-        if info["gpu"]:
-            info["gpu_name"] = torch.cuda.get_device_name(0)
-    except ImportError:
-        info["gpu"] = False
-    return info
+    # Este processo NÃO abre sessão CUDA/HIP: toda a GPU fica nos subprocessos.
+    # Por isso não reportamos uso de GPU aqui — o log do worker mostra tudo.
+    return {
+        "status": "ok",
+        "stem_model": STEM_MODEL,
+        "karaoke_model": KARAOKE_MODEL,
+        "worker": str(_WORKER),
+    }
 
 
 @app.post("/separate")
@@ -133,14 +129,21 @@ def separate(req: SeparateRequest):
     ext = OUTPUT_FORMAT.lower()
     try:
         with _lock:
-            vocals, instrumental = _run_pass(STEM_MODEL, src)
+            # ---------- Passada 1: voz x instrumental ----------
+            out1 = SCRATCH_DIR / "separator_output_pass1"
+            vocals, instrumental = _run_pass(STEM_MODEL, src, out1)
             shutil.move(str(instrumental), dest / f"instrumental.{ext}")
-            # a voz isolada vira a entrada da segunda passada
+
+            # A voz isolada vira a entrada da segunda passada.
             tmp_vocals = SCRATCH_DIR / f"_vocals_{src.stem}{vocals.suffix}"
             shutil.move(str(vocals), tmp_vocals)
-            lead, backing = _run_pass(KARAOKE_MODEL, tmp_vocals)
+
+            # ---------- Passada 2: voz principal x backing ----------
+            out2 = SCRATCH_DIR / "separator_output_pass2"
+            lead, backing = _run_pass(KARAOKE_MODEL, tmp_vocals, out2)
             shutil.move(str(lead), dest / f"lead.{ext}")
             shutil.move(str(backing), dest / f"backing.{ext}")
+
             tmp_vocals.unlink(missing_ok=True)
     except HTTPException:
         raise
@@ -156,6 +159,11 @@ def separate(req: SeparateRequest):
 
 # --------------------------------------------------------------------------
 # Alinhamento palavra a palavra (stable-ts + LRC como mapa de janelas)
+#
+# Observação: o /align ainda roda no processo principal. Ele carrega o Whisper
+# e cria uma sessão CUDA/HIP no main. Como o /separate roda em subprocessos,
+# essa sessão do main não interfere — mas evite rodar /align e /separate ao
+# mesmo tempo. O _lock já serializa os dois.
 # --------------------------------------------------------------------------
 _align_models: dict = {}
 

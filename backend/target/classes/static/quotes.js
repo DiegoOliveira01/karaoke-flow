@@ -13,7 +13,6 @@ window.QUOTES = [
   { text: "Karaokê vem do japonês: kara, “vazio”, e oke, de “orquestra”.", author: "Curiosidade" },
 
   // originais
-  { text: "Hoje o palco é a sala de casa." },
   { text: "Cantar é um jeito de a alma esticar as pernas." },
   { text: "Agudo difícil? Cante com convicção." },
   { text: "A vida tem trilha sonora; só falta o microfone." },

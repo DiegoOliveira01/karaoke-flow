@@ -43,11 +43,7 @@ echo Porta: 8001
 echo GPU: AMD Radeon RX 6600
 echo.
 
-REM ----- Variaveis de ambiente do ROCm/PyTorch -----
-REM  MIOPEN_FIND_MODE=2       -> evita re-treinar kernels a cada troca de modelo
-REM  PYTORCH_HIP_ALLOC_CONF   -> alocador com segmentos expansiveis (reduz fragmentacao)
-REM  Nao usamos HSA_OVERRIDE_GFX_VERSION: o fork gfx1030 do ROCm ja traz os kernels nativos.
-start "Karaoke - Separator ROCm" cmd /k "cd /d "%SEPARATOR%" && set MIOPEN_FIND_MODE=2 && set PYTORCH_HIP_ALLOC_CONF=expandable_segments:True && "%PYTHON%" -m uvicorn main:app --host 0.0.0.0 --port 8001"
+start "Karaoke - Separator ROCm" cmd /k "cd /d "%SEPARATOR%" && "%PYTHON%" -m uvicorn main:app --host 0.0.0.0 --port 8001"
 
 echo Aguardando inicializacao do Separator...
 timeout /t 3 /nobreak >nul
