@@ -14,6 +14,16 @@ const STATUS_LABEL = {
 
 const $ = (id) => document.getElementById(id);
 
+/* ---------- modo convidado ---------- */
+let serverInfo = { url: location.origin, local: true };
+const isGuest = () => !serverInfo.local;
+
+async function loadServerInfo() {
+  try {
+    serverInfo = await api("/api/server-info");
+  } catch (_) { /* mantém padrão local */ }
+}
+
 /** Cria elemento: props viram atributos; "onclick" etc. viram listeners. */
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -78,6 +88,7 @@ let loadedRev = -1;      // rev da letra/capa já aplicada na tela
 let pollTimer = null;
 
 async function refresh() {
+  await loadServerInfo();
   try { songs = await api(API); } catch (_) { /* backend fora do ar: tenta de novo adiante */ }
   renderSongs();
   if (current) {
@@ -193,7 +204,7 @@ function songCard(s, menuOpen) {
       s.status === "READY" && hasLyrics ? item("Palavras sincronizadas", () => openWordsDialog(s)) : "",
       item(cover ? "Trocar capa" : "Escolher capa", () => openCoverDialog(s)),
       item("Apagar", () => removeSong(s), "danger")));
-  actions.append(menu);
+  if (!isGuest()) actions.append(menu);
 
   const li = el("li", { className: "song" + (current && s.id === current.id ? " active" : "") }, media, body, actions);
   li.dataset.status = s.status;
@@ -1812,3 +1823,24 @@ applyDisplay();
 initLibraryUi();
 showQuote();
 refresh();
+
+/* ============================================================
+   Compartilhar com a rede (QR code)
+   ============================================================ */
+function openShareDialog() {
+  $("share-url").textContent = serverInfo.url;
+
+  const container = $("qr-container");
+  container.replaceChildren();
+
+  // qrcode-generator: tipo 0 = escolhe o tamanho automaticamente; nível M de correção
+  const qr = qrcode(0, "M");
+  qr.addData(serverInfo.url);
+  qr.make();
+  container.innerHTML = qr.createSvgTag({ cellSize: 6, margin: 2 });
+
+  $("dlg-share").showModal();
+}
+
+$("share-open").addEventListener("click", openShareDialog);
+$("share-close").addEventListener("click", () => $("dlg-share").close());

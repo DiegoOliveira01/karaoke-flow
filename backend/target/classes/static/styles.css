@@ -540,3 +540,8 @@ kbd {
   .ed-line { grid-template-columns: 1fr 24px; }
   .ed-go { grid-column: 1 / -1; justify-self: start; }
 }
+
+/* ---------- compartilhar com a rede ---------- */
+.topbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.qr svg { width: 240px; height: 240px; display: block; margin: 1rem auto; }
+.share-url { text-align: center; font-family: monospace; word-break: break-all; color: var(--muted); }

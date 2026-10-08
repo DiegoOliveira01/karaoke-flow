@@ -14,7 +14,10 @@
     <h1>Karaokê</h1>
     <p class="quote" id="quote"><span id="quote-text"></span><span class="q-author" id="quote-author"></span></p>
   </div>
-  <button class="btn add-open" id="add-open" type="button">+ Adicionar música</button>
+  <div class="topbar-actions">
+    <button class="btn ghost" id="share-open" type="button" title="Compartilhar com a rede">Compartilhar</button>
+    <button class="btn add-open" id="add-open" type="button">+ Adicionar música</button>
+  </div>
 </header>
 
 <div class="app">
@@ -152,6 +155,21 @@
   <ul class="cover-grid" id="cover-results"></ul>
 </dialog>
 
+<!-- ===== diálogo: compartilhar com a rede ===== -->
+<dialog id="dlg-share" aria-labelledby="dlg-share-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-share-title">Adicionar músicas de outros aparelhos</h2>
+    <button class="btn ghost" aria-label="Fechar">Fechar</button>
+  </form>
+  <p>Escaneie com a câmera do celular ou tablet. Outros aparelhos podem ver o catálogo e
+     adicionar músicas — mas só este computador pode apagar ou editar.</p>
+  <div id="qr-container" class="qr"></div>
+  <p id="share-url" class="share-url"></p>
+  <div class="dialog-actions">
+    <button id="share-close" class="btn ghost" type="button">Fechar</button>
+  </div>
+</dialog>
+
 <!-- ===== tela de karaokê ===== -->
 <div class="stage" id="stage" hidden role="dialog" aria-label="Tela de karaokê" aria-modal="true">
   <div class="stage-bg" id="stage-bg"></div>
@@ -286,6 +304,7 @@
 <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 <div class="drop-overlay" id="drop-overlay" hidden aria-hidden="true">Solte o áudio para adicionar</div>
 
+<script src="qrcode.js"></script>
 <script src="quotes.js"></script>
 <script src="app.js"></script>
 </body>

@@ -1,12 +1,15 @@
 dev\karaoke\model\WordsFile.class
+dev\karaoke\web\GuestRestrictionFilter.class
 dev\karaoke\service\LrclibClient$LyricsResult.class
 dev\karaoke\service\LrclibClient.class
 dev\karaoke\model\WordsFile$Word.class
+dev\karaoke\web\ServerInfoController.class
 dev\karaoke\model\WordsFile$Line.class
 dev\karaoke\service\ItunesClient$Image.class
 dev\karaoke\web\SongController$CoverChoice.class
 dev\karaoke\web\SongController$LyricsChoice.class
 dev\karaoke\config\KaraokeProperties$Itunes.class
+dev\karaoke\web\ServerInfoController$ServerInfo.class
 dev\karaoke\web\SearchController.class
 dev\karaoke\service\ItunesClient$CoverResult.class
 dev\karaoke\service\ItunesClient.class
