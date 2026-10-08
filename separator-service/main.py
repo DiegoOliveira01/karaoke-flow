@@ -37,7 +37,11 @@ app = FastAPI(title="Karaoke separator")
 
 # Uma GPU só: serializa as separações e reaproveita os modelos já carregados.
 _lock = threading.Lock()
-_separators: dict = {}
+#_separators: dict = {}
+
+_separator = None
+_separator_model = None
+_separator_out = None
 
 
 class SeparateRequest(BaseModel):
@@ -46,16 +50,40 @@ class SeparateRequest(BaseModel):
 
 
 def _get_separator(model_name: str):
-    if model_name not in _separators:
-        from audio_separator.separator import Separator  # import tardio: demora
+    global _separator, _separator_model, _separator_out
 
-        out = SCRATCH_DIR / model_name.replace("/", "_")
-        out.mkdir(parents=True, exist_ok=True)
-        sep = Separator(output_dir=str(out), output_format=OUTPUT_FORMAT)
-        sep.load_model(model_filename=model_name)
-        _separators[model_name] = (sep, out)
-    return _separators[model_name]
+    from audio_separator.separator import Separator
+    import gc
+    import torch
 
+    # Já está carregado.
+    if _separator is not None and _separator_model == model_name:
+        return _separator, _separator_out
+
+    # Se estamos trocando de modelo, libera o Separator anterior.
+    if _separator is not None:
+        _separator = None
+        _separator_model = None
+
+        gc.collect()
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    # Cria um novo Separator para o modelo solicitado.
+    out = SCRATCH_DIR / "separator_output"
+    out.mkdir(parents=True, exist_ok=True)
+
+    _separator = Separator(
+        output_dir=str(out),
+        output_format=OUTPUT_FORMAT,
+    )
+
+    _separator.load_model(model_filename=model_name)
+    _separator_model = model_name
+    _separator_out = out
+
+    return _separator, _separator_out
 
 def _pick(files: list[Path], kind: str) -> Path:
     """Acha o arquivo de saída que tem '(Vocals)' ou '(Instrumental)' no nome."""
@@ -68,12 +96,15 @@ def _pick(files: list[Path], kind: str) -> Path:
 
 
 def _run_pass(model_name: str, input_file: Path) -> tuple[Path, Path]:
-    """Roda um modelo e devolve (vocals, instrumental)."""
     sep, out_dir = _get_separator(model_name)
-    for old in out_dir.iterdir():  # limpa resto de execuções anteriores
+
+    for old in out_dir.iterdir():
         old.unlink()
+
     sep.separate(str(input_file))
+
     files = [p for p in out_dir.iterdir() if p.is_file()]
+
     return _pick(files, "vocals"), _pick(files, "instrumental")
 
 
