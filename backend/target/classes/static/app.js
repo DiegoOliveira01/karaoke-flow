@@ -49,6 +49,28 @@ const store = {
   },
 };
 
+/* ---------- temas ---------- */
+const THEMES = ["roxo", "oceano", "ambar", "verde", "angelblue"];
+
+function applyTheme(name) {
+  const theme = THEMES.includes(name) ? name : "roxo";
+  document.documentElement.dataset.theme = theme;
+  store.set("theme", theme);
+  const btn = $("theme-cycle");
+  if (btn) {
+    const label = theme.charAt(0).toUpperCase() + theme.slice(1);
+    btn.title = `Tema: ${label} (clique para trocar)`;
+    btn.setAttribute("aria-label", `Tema atual: ${label}. Clique para trocar.`);
+  }
+}
+
+function cycleTheme() {
+  const current = document.documentElement.dataset.theme || "roxo";
+  const idx = THEMES.indexOf(current);
+  const next = THEMES[(idx + 1) % THEMES.length];
+  applyTheme(next);
+}
+
 function fmt(sec) {
   sec = Math.max(0, Math.floor(sec || 0));
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
@@ -1954,6 +1976,11 @@ applyMix();
 applyDisplay();
 initLibraryUi();
 showQuote();
+
+// tema: restaura o salvo e liga o botão
+applyTheme(store.get("theme", "roxo"));
+$("theme-cycle").addEventListener("click", cycleTheme);
+
 refresh();
 
 /* ============================================================

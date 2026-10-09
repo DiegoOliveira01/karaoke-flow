@@ -71,6 +71,11 @@ public class YtDlpClient {
         List<String> cmd = new ArrayList<>();
         cmd.add(executable);
         cmd.add("--no-playlist");
+        // Habilita o download do script "challenge solver" do GitHub.
+        // Sem isso, o yt-dlp não resolve o n challenge do player do YouTube
+        // e só encontra imagens como formato disponível.
+        cmd.add("--remote-components");
+        cmd.add("ejs:github");
         if (!cookiesPath.isBlank() && Files.isRegularFile(Path.of(cookiesPath))) {
             cmd.add("--cookies");
             cmd.add(cookiesPath);

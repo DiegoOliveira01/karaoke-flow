@@ -13,6 +13,8 @@
   --radius: 14px;
   --display: "Futura", "Century Gothic", "Avenir Next", "Trebuchet MS", system-ui, sans-serif;
   --body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --ink-on-hot: #26001a;
+  --stage-gradient: radial-gradient(circle at 30% 20%, #5b2a86 0%, #1c1230 60%, #0d0718 100%);
 }
 * { box-sizing: border-box; }
 /* sem isto, qualquer elemento com display próprio ignora o atributo hidden */
@@ -70,7 +72,7 @@ input[type=text]:focus, input[type=search]:focus { border-color: var(--soft); ou
 
 .btn {
   border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 700;
-  background: var(--hot); color: #26001a;
+  background: var(--hot); color: var(--ink-on-hot);
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn.ghost { background: transparent; color: var(--muted); border: 2px solid var(--panel-2); font-weight: 600; }
@@ -222,7 +224,7 @@ input[type=text]:focus, input[type=search]:focus { border-color: var(--soft); ou
 }
 .drop-overlay {
   position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; pointer-events: none;
-  background: rgba(28, 18, 48, .88); border: 4px dashed var(--hot); font-family: var(--display); font-size: 1.6rem; font-weight: 800;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
 }
 
 /* ---------- player ---------- */
@@ -333,11 +335,11 @@ dialog > p { margin: 0 0 8px; }
 .stage {
   --art: .55; --blur: 6px; --shadow: .6; --scrim: .35;
   position: fixed; inset: 0; z-index: 1000; overflow: hidden;
-  background: #0d0718; color: #fff;
+  background: var(--ink-on-hot); color: #fff;
 }
 .stage-bg {
   position: absolute; inset: -6%;
-  background: radial-gradient(circle at 30% 20%, #5b2a86 0%, #1c1230 60%, #0d0718 100%) center / cover no-repeat;
+  background: var(--stage-gradient) center / cover no-repeat;
   opacity: 1;
 }
 .stage-bg.has-art { opacity: var(--art); filter: blur(var(--blur)); }
@@ -369,8 +371,11 @@ dialog > p { margin: 0 0 8px; }
 .chip:hover { background: rgba(255, 255, 255, .24); }
 .chip.ghost { background: transparent; }
 
+#add-youtube-open { width: 100%; padding: 10px 16px; }
+
 .lyrics-viewport {
   position: absolute; inset: 0; overflow: hidden;
+  pointer-events: none;
   -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 14%, #000 80%, transparent 100%);
           mask-image: linear-gradient(180deg, transparent 0, #000 14%, #000 80%, transparent 100%);
 }
@@ -415,8 +420,9 @@ dialog > p { margin: 0 0 8px; }
 .countdown span {
   display: grid; place-items: center; width: clamp(5rem, 12vw, 9rem); aspect-ratio: 1; border-radius: 50%;
   font-family: var(--display); font-weight: 800; font-size: clamp(3rem, 8vw, 6rem); line-height: 1; color: #fff;
-  background: rgba(255, 77, 141, .88);
-  box-shadow: 0 0 0 .5rem rgba(255, 77, 141, .28), 0 8px 30px rgba(0, 0, 0, .5);
+  background: color-mix(in srgb, var(--hot) 88%, transparent);
+  box-shadow: 0 0 0 .5rem color-mix(in srgb, var(--hot) 28%, transparent),
+              0 8px 30px rgba(0, 0, 0, .5);
 }
 @media (prefers-reduced-motion: no-preference) {
   .countdown.tick span { animation: cd-pulse .9s ease-out; }
@@ -503,7 +509,7 @@ kbd {
 .cw.timed.todo { background: rgba(255, 255, 255, .14); }
 .cw.timed.done { background: rgba(255, 77, 141, .38); }
 .cw.timed.now { background: linear-gradient(90deg, var(--hot) var(--wp, 0%), rgba(255, 255, 255, .14) var(--wp, 0%)); color: #fff; }
-.cw.rec { background: var(--hot); color: #26001a; border-color: #fff; }
+.cw.rec { background: var(--hot); color: var(--ink-on-hot); border-color: #fff; }
 .cw.cursor { outline: 3px solid var(--warn); outline-offset: 1px; }
 
 .ed-controls { background: var(--panel); border-top: 1px solid var(--panel-2); padding: 12px 20px 16px; display: grid; gap: 10px; }
@@ -532,8 +538,8 @@ kbd {
   touch-action: none; user-select: none; -webkit-user-select: none;
 }
 .tap-pad small { display: block; font-family: var(--body); font-weight: 500; font-size: .8rem; color: var(--muted); margin-top: 2px; }
-.tap-pad.down { background: var(--hot); color: #26001a; }
-.tap-pad.down small { color: #26001a; }
+.tap-pad.down { background: var(--hot); color: var(--ink-on-hot); }
+.tap-pad.down small { color: var(--ink-on-hot); }
 .ed-line-actions { display: flex; gap: 8px; flex-wrap: wrap; align-content: center; }
 
 @media (max-width: 700px) {
@@ -545,3 +551,77 @@ kbd {
 .topbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .qr svg { width: 240px; height: 240px; display: block; margin: 1rem auto; }
 .share-url { text-align: center; font-family: monospace; word-break: break-all; color: var(--muted); }
+
+/* ============================================================
+   Temas (o padrão "roxo" é o que está em :root)
+   O atributo data-theme no <html> troca só as cores, mantendo
+   todo o resto do CSS igual. Adicionar nome de novos temas no app.js
+   na linha const THEMES = ["xxx", "xxx", "xxx"];
+   ============================================================ */
+
+html[data-theme="oceano"] {
+  --stage: #0a1929;
+  --panel: #112a45;
+  --panel-2: #1a3d5c;
+  --ink: #e8f4ff;
+  --muted: #8ba8c4;
+  --hot: #00d4ff;      /* ciano (voz do cantor / letra cantada) */
+  --cool: #7bffc1;     /* menta (backing vocals) */
+  --soft: #4d8fc7;     /* azul médio (instrumental) */
+  --ok: #62e3a4;
+  --warn: #ffc857;
+  --bad: #ff7a7a;
+  --ink-on-hot: #002233;
+  --stage-gradient: radial-gradient(circle at 30% 20%, #1a4a7a 0%, #0a1929 60%, #050c14 100%);
+}
+
+html[data-theme="ambar"] {
+  --stage: #1a0e08;
+  --panel: #2e1a0e;
+  --panel-2: #43291a;
+  --ink: #fff4e6;
+  --muted: #c9a989;
+  --hot: #ff9500;      /* âmbar (voz do cantor / letra cantada) */
+  --cool: #ffd966;     /* dourado (backing vocals) */
+  --soft: #d9803a;     /* laranja queimado (instrumental) */
+  --ok: #a3d977;
+  --warn: #ffc857;
+  --bad: #ff6b5b;
+  --ink-on-hot: #2a1500;
+  --stage-gradient: radial-gradient(circle at 30% 20%, #7a3f1a 0%, #1a0e08 60%, #0a0503 100%);
+}
+
+html[data-theme="verde"] {
+  --stage: #0a1a0f;
+  --panel: #122b18;
+  --panel-2: #1a3d24;
+  --ink: #e8ffec;
+  --muted: #8bc49a;
+  --hot: #00e676;      /* verde vivo (voz do cantor / letra cantada) */
+  --cool: #7bffd4;     /* água-marinha (backing vocals) */
+  --soft: #4db86a;     /* verde folha (instrumental) */
+  --ok: #62e3a4;
+  --warn: #ffc857;
+  --bad: #ff7a7a;
+  --ink-on-hot: #002a0f;
+  --stage-gradient: radial-gradient(circle at 30% 20%, #1a7a3f 0%, #0a1a0f 60%, #030a06 100%);
+}
+
+html[data-theme="angelblue"] {
+  --stage: #05052b;
+  --panel: #1c1027;
+  --panel-2: #2e3785;
+  --ink: #f0e8ff;
+  --muted: #98b3ec;
+  --hot: #5c3fff;      /* verde vivo (voz do cantor / letra cantada) */
+  --cool: #937bff;     /* água-marinha (backing vocals) */
+  --soft: #05070e;     /* verde folha (instrumental) */
+  --ok: #94b6ff;
+  --warn: #ffb41f;
+  --bad: #ff4040;
+  --ink-on-hot: #fffcfc;
+  --stage-gradient: radial-gradient(circle at 30% 20%, #00014e 0%, #0f0a1a 60%, #07030a 100%);
+}
+
+/* botão de tema: quadrado compacto (o emoji é o rótulo) */
+#theme-cycle { padding: 10px 12px; font-size: 1.05rem; line-height: 1; }

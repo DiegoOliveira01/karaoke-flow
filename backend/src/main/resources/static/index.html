@@ -7,6 +7,13 @@
 <title>Karaokê</title>
 <link rel="stylesheet" href="styles.css">
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
+<script>
+  // aplica o tema salvo ANTES do CSS pintar a tela (evita "flash" do tema errado)
+  try {
+    const saved = JSON.parse(localStorage.getItem("theme"));
+    if (saved) document.documentElement.dataset.theme = saved;
+  } catch (_) {}
+</script>
 </head>
 <body>
 
@@ -16,6 +23,7 @@
     <p class="quote" id="quote"><span id="quote-text"></span><span class="q-author" id="quote-author"></span></p>
   </div>
   <div class="topbar-actions">
+    <button class="btn ghost" id="theme-cycle" type="button" title="Mudar tema" aria-label="Mudar tema">🎨</button>
     <button class="btn ghost" id="share-open" type="button" title="Compartilhar com a rede">Compartilhar</button>
     <button class="btn add-open" id="add-open" type="button">+ Adicionar música</button>
   </div>
@@ -94,7 +102,7 @@
   </form>
 
   <div class="or-sep" role="separator"><span>ou</span></div>
-  <button class="btn ghost" type="button" id="add-youtube-open">Baixar do YouTube</button>
+  <button class="btn" type="button" id="add-youtube-open">Baixar do YouTube</button>
 </dialog>
 
 <!-- ===== diálogo: baixar do YouTube ===== -->
