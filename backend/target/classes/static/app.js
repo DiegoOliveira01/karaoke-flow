@@ -357,9 +357,6 @@ addInput.addEventListener("change", onAddFilesChosen);
 function openAddDialog(files) {
   $("add-form").reset();
   setStatus("add-status", "");
-  setStatus("url-status", "");          
-  $("add-url-input").value = "";         
-  $("add-url-btn").disabled = false; 
   onAddFilesChosen();
   if (!$("dlg-add").open) $("dlg-add").showModal();
   if (files && files.length) setAddFiles(files);
@@ -407,35 +404,137 @@ $("add-form").addEventListener("submit", async (ev) => {
   }
 });
 
-/* ---------- baixar do YouTube ---------- */
-$("add-url-btn").addEventListener("click", downloadFromUrl);
+/* ============================================================
+   Baixar do YouTube (busca com escolha + confirmação de metadados)
+   ============================================================ */
+let youtubeChoice = null;   // resultado selecionado pelo usuário
 
-$("add-url-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    e.preventDefault(); // não submete o add-form
-    downloadFromUrl();
+function openYoutubeDialog() {
+  $("dlg-add").close();
+  $("youtube-search-form").reset();
+  $("youtube-results").replaceChildren();
+  $("youtube-confirm").hidden = true;
+  youtubeChoice = null;
+  setStatus("youtube-status", "");
+  setStatus("youtube-confirm-status", "");
+  $("youtube-confirm-btn").disabled = false;
+  $("dlg-youtube").showModal();
+  $("youtube-query").focus();
+}
+
+$("add-youtube-open").addEventListener("click", openYoutubeDialog);
+
+$("youtube-search-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const query = $("youtube-query").value.trim();
+  if (!query) return;
+
+  // Se for URL, pula a busca e vai direto para o passo de confirmação.
+  if (/^https?:\/\//i.test(query)) {
+    youtubeChoice = {
+      videoUrl: query,
+      suggestedTitle: "",
+      suggestedArtist: "",
+      title: "",
+      channel: "",
+    };
+    showYoutubeConfirm();
+    return;
+  }
+
+  const list = $("youtube-results");
+  list.replaceChildren();
+  $("youtube-confirm").hidden = true;
+  setStatus("youtube-status", "Buscando…");
+  try {
+    const results = await api(`${API}/youtube/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    setStatus("youtube-status",
+      results.length ? "Escolha o vídeo certo:" : "Nada encontrado. Tente outro termo.");
+    for (const r of results) list.append(youtubeResultItem(r));
+  } catch (e) {
+    setStatus("youtube-status", e.message, true);
   }
 });
 
-async function downloadFromUrl() {
-  const value = $("add-url-input").value.trim();
-  if (!value) return;
-  $("add-url-btn").disabled = true;
-  setStatus("url-status", "Baixando do YouTube… pode levar até 1 minuto.");
+function youtubeResultItem(r) {
+  const button = el("button", { className: "btn", type: "button" }, "Escolher");
+  button.addEventListener("click", () => {
+    youtubeChoice = {
+      videoUrl: r.url,
+      title: r.title,
+      suggestedTitle: r.suggestedTitle,
+      suggestedArtist: r.suggestedArtist,
+      channel: r.channel,
+    };
+    showYoutubeConfirm();
+  });
+  const meta = [r.channel, r.durationSec ? fmt(r.durationSec) : ""].filter(Boolean).join(" • ");
+  return el("li", { className: "result" },
+    el("div", {},
+      el("div", { className: "r-title" }, r.title),
+      el("div", { className: "r-meta" }, meta)),
+    button);
+}
+
+function showYoutubeConfirm() {
+  const r = youtubeChoice;
+  if (!r) return;
+  $("youtube-results").replaceChildren();
+  setStatus("youtube-status", "");
+  $("youtube-title").value = r.suggestedTitle || r.title || "";
+  $("youtube-artist").value = r.suggestedArtist || r.channel || "";
+  $("youtube-confirm").hidden = false;
+  $("youtube-confirm-status").textContent = "";
+  $("youtube-title").focus();
+}
+
+$("youtube-cancel").addEventListener("click", () => {
+  const wasFromUrl = youtubeChoice && youtubeChoice.videoUrl && !youtubeChoice.title;
+  $("youtube-confirm").hidden = true;
+  youtubeChoice = null;
+  if (wasFromUrl) {
+    // veio de URL colada: volta para a busca
+    $("youtube-query").value = "";
+    $("youtube-query").focus();
+  } else {
+    // veio da lista: o usuário volta a ver os resultados
+    $("youtube-query").focus();
+  }
+});
+
+$("youtube-confirm-btn").addEventListener("click", async () => {
+  if (!youtubeChoice) return;
+  const title = $("youtube-title").value.trim();
+  const artist = $("youtube-artist").value.trim();
+  if (!title) {
+    setStatus("youtube-confirm-status", "Informe um título.", true);
+    return;
+  }
+
+  $("youtube-confirm-btn").disabled = true;
+  setStatus("youtube-confirm-status", "Baixando do YouTube… pode levar até 1 minuto.");
   try {
-    const song = await api(`${API}/from-url`, {
+    const song = await api(`${API}/from-youtube`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: value }),
+      body: JSON.stringify({
+        videoUrl: youtubeChoice.videoUrl,
+        title,
+        artist,
+      }),
     });
-    $("dlg-add").close();
+    $("dlg-youtube").close();
     toast(`“${song.title}” baixada. Separando as vozes…`);
     refresh();
   } catch (e) {
-    setStatus("url-status", e.message || "Não foi possível baixar.", true);
-    $("add-url-btn").disabled = false;
+    setStatus("youtube-confirm-status", e.message || "Não foi possível baixar.", true);
+    $("youtube-confirm-btn").disabled = false;
   }
-}
+});
 
 /* ---------- ligações da biblioteca ---------- */
 function syncViewButtons() {

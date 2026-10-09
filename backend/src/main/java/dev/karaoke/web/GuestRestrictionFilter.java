@@ -49,9 +49,13 @@ public class GuestRestrictionFilter extends OncePerRequestFilter {
             return true; // leitura liberada
         }
         // adicionar música (upload de arquivo OU download do YouTube) é liberado
-        if ("POST".equals(m) && ("/api/songs".equals(p) || "/api/songs/from-url".equals(p))) {
-            return true;
-        }
+        if ("POST".equals(m) && (
+            "/api/songs".equals(p)
+            || "/api/songs/from-url".equals(p)
+            || "/api/songs/from-youtube".equals(p)
+            || "/api/songs/youtube/search".equals(p))) {
+        return true;
+}
         return false;
     }
 }

@@ -177,6 +177,45 @@ public class SongService {
         }
     }
 
+    /**
+     * Baixa um vídeo específico do YouTube (URL ou videoId já escolhido pelo usuário),
+     * com título e artista fornecidos pela UI. Não faz probe — o usuário já revisou.
+    */
+    public Song createFromYoutube(String videoUrl, String title, String artist) {
+        String id = UUID.randomUUID().toString();
+        Path dir = root.resolve(id);
+        try {
+            Files.createDirectories(dir);
+            ytdlp.download(videoUrl, dir.resolve("original"));
+
+            try (Stream<Path> files = Files.list(dir)) {
+                boolean hasAudio = files.anyMatch(p -> p.getFileName().toString().startsWith("original."));
+                if (!hasAudio) {
+                    throw new IOException("yt-dlp não gerou nenhum arquivo de áudio em " + dir);
+                }
+            }
+
+            String cleanTitle = (title == null || title.isBlank()) ? "Música " + id.substring(0, 8) : title.trim();
+            String cleanArtist = (artist == null) ? "" : artist.trim();
+
+            Song song = Song.queued(id, cleanTitle, cleanArtist);
+            persist(song);
+            enqueue(song);
+            return song;
+        } catch (Exception e) {
+            try (Stream<Path> walk = Files.walk(dir)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            } catch (IOException ignored) { }
+            throw new UncheckedIOException(new IOException(
+                    "Falha ao baixar do YouTube: " + e.getMessage(), e));
+        }
+    }
+
+    public List<YtDlpClient.Candidate> searchYoutube(String query, int limit)
+        throws IOException, InterruptedException {
+    return ytdlp.search(query, limit);
+    }
+
 
     public boolean delete(String id) {
         Song removed = songs.remove(id);

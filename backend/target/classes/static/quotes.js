@@ -5,13 +5,6 @@
  * Frases sem autor são originais deste projeto; as com autor são citações conhecidas.
  */
 window.QUOTES = [
-  // citações
-  { text: "Sem música, a vida seria um erro.", author: "Friedrich Nietzsche" },
-  { text: "Depois do silêncio, o que mais se aproxima de expressar o inexprimível é a música.", author: "Aldous Huxley" },
-  { text: "Quem canta seus males espanta.", author: "Provérbio popular" },
-  { text: "Karaokê vem do japonês: kara, “vazio”, e oke, de “orquestra”.", author: "Curiosidade" },
-
-  // originais
 
   // By Diego
   { text: "Pra quem ta devendo, qualquer pergunta é cobrança", author: "Diego o ligeiro" },
@@ -33,10 +26,15 @@ window.QUOTES = [
   { text: "You, Big Stupid Jellyfish", author: "Commander Shepard"},
   { text: "Because it's a big stupid jellyfish", author: "Commander Shepard"}, 
   { text: "Rudimentary creatures of blood and flesh, you touch my mind fumbling in ignorance, incapable of undestanding", author: "Soverign"},
-  { text: "Rudimentary creatures of blood and flesh, you touch my mind fumbling in ignorance, incapable of undestanding", author: "Soverign"},
   { text: "Does this unit have a soul?", author: "Legion"},
   { text: "Ainda bem que ele não olha debaixo da mesa, porque se olhasse eu tava fudido", author: "Tripulante da Nostromo"},
   { text: "Eu não confio em ninguém que ganha mais do que eu", author: "Joker"},
   { text: "Quack", author: "Pato"},
-
+  { text: "If not us, then who!?", author: "Metro Spartans"},
+  { text: "The right man in the wrong place can make all the difference in the world", author: "The G-Man, Half-Life 2"}, 
+  { text: "I used to be an adventurer like you, then I took an arrow in the knee", author: "Guard, Skyrim"}, 
+  { text: "I too am whooo. But I'm also wheee! So the wheee balances the whooo.", author: "Esquie"}, 
+  { text: "And remember that bad times...are just times that are bad", author: "Katrina - Animal Crossing"}, 
+  { text: "Did I ever tell you what the definition of insanity is?", author: "Vaas"}, 
+  { text: "In peace, vigilance. In war, victory. In death, sacrifice", author: "The Grey Wardens"}, 
 ];

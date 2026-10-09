@@ -92,16 +92,41 @@
     <button class="btn" type="submit" id="add-btn" disabled>Separar vozes</button>
     <div class="status" id="add-status" role="status"></div>
   </form>
-  <div class="or-sep" role="separator"><span>ou</span></div>
 
-  <div class="add-url">
-    <input type="text" id="add-url-input"
-           placeholder="URL do YouTube ou nome da música (ex.: Mike Oldfield - Nuclear)"
-           autocomplete="off">
-    <button class="btn" type="button" id="add-url-btn">Baixar</button>
+  <div class="or-sep" role="separator"><span>ou</span></div>
+  <button class="btn ghost" type="button" id="add-youtube-open">Baixar do YouTube</button>
+</dialog>
+
+<!-- ===== diálogo: baixar do YouTube ===== -->
+<dialog id="dlg-youtube" aria-labelledby="dlg-youtube-title">
+  <form method="dialog" class="dlg-head">
+    <h2 id="dlg-youtube-title">Baixar do YouTube</h2>
+    <button class="btn ghost" aria-label="Fechar">Fechar</button>
+  </form>
+
+  <form class="dlg-search" id="youtube-search-form">
+    <input type="text" id="youtube-query" placeholder="Nome da música ou URL do vídeo"
+           required autocomplete="off">
+    <button class="btn" type="submit">Buscar</button>
+  </form>
+  <p class="hint">Cole uma URL para pular a busca, ou digite para procurar no YouTube.</p>
+
+  <div class="status" id="youtube-status" role="status"></div>
+  <ul class="results" id="youtube-results"></ul>
+
+  <div id="youtube-confirm" hidden>
+    <hr>
+    <p><strong>Confirme os dados antes de baixar</strong></p>
+    <div class="add-fields">
+      <input type="text" id="youtube-title" placeholder="Título" autocomplete="off">
+      <input type="text" id="youtube-artist" placeholder="Artista" autocomplete="off">
+    </div>
+    <div class="dialog-actions">
+      <button class="btn ghost" type="button" id="youtube-cancel">Cancelar</button>
+      <button class="btn" type="button" id="youtube-confirm-btn">Baixar e separar</button>
+    </div>
+    <div class="status" id="youtube-confirm-status" role="status"></div>
   </div>
-  <p class="hint">Se digitar só o nome, baixa o primeiro resultado do YouTube.</p>
-  <div class="status" id="url-status" role="status"></div>
 </dialog>
 
 <!-- ===== diálogo: escolher letra ===== -->

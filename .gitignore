@@ -13,8 +13,16 @@ separator-service/scratch/
 separator-service/models/*.ckpt
 separator-service/models/*.yaml
 
+# ---------- cookies do YouTube ----------
+cookies.txt
+backend/cookies.txt
+separator-service/cookies.txt
+**/cookies.txt
+
 # Generated application data
 backend/data/
+data/songs/
+scratch/
 
 # IDE
 .idea/

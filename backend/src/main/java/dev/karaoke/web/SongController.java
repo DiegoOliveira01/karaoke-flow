@@ -24,6 +24,7 @@ import dev.karaoke.model.WordsFile;
 import dev.karaoke.service.ItunesClient;
 import dev.karaoke.service.LrclibClient;
 import dev.karaoke.service.SongService;
+import dev.karaoke.service.YtDlpClient;
 
 @RestController
 @RequestMapping("/api/songs")
@@ -49,6 +50,9 @@ public class SongController {
     }
 
     public record UrlRequest(String url) {
+    }
+
+    public record SearchRequest(String query) {
     }
 
     @GetMapping
@@ -157,6 +161,34 @@ public class SongController {
         }
         try {
             return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.createFromUrl(body.url().trim()));
+        } catch (UncheckedIOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
+    }
+
+    @PostMapping("/youtube/search")
+    public List<YtDlpClient.Candidate> searchYoutube(@RequestBody SearchRequest body) {
+        if (body.query() == null || body.query().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe um termo de busca");
+        }
+        try {
+            return service.searchYoutube(body.query(), 5);
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY,
+                    "Falha na busca: " + e.getMessage());
+        }
+    }
+
+    public record YoutubeChoice(String videoUrl, String title, String artist) {}
+
+    @PostMapping("/from-youtube")
+    public ResponseEntity<Song> uploadFromYoutube(@RequestBody YoutubeChoice body) {
+        if (body.videoUrl() == null || body.videoUrl().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe o vídeo escolhido");
+        }
+        try {
+            return ResponseEntity.status(HttpStatus.ACCEPTED)
+                    .body(service.createFromYoutube(body.videoUrl(), body.title(), body.artist()));
         } catch (UncheckedIOException e) {
             throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
         }

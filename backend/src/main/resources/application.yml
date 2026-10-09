@@ -17,3 +17,6 @@ karaoke:
     read-timeout: 90m   # separar uma música pode demorar bastante sem GPU
   itunes:
     country: BR         # loja usada na busca de capas
+  ytdlp:
+    path: yt-dlp
+    cookies: C:/Users/diego/OneDrive/Documentos/karaoke-flow/separator-service/cookies.txt
