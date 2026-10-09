@@ -137,17 +137,55 @@ public class SongService {
     // ---------------------------------------------------------------- letra / capa
 
     public Optional<Song> attachLyrics(String id, String lrc) {
-        if (!songs.containsKey(id)) { // só ids conhecidos viram caminho de arquivo
+    if (!songs.containsKey(id)) {
+        return Optional.empty();
+    }
+    Path dir = root.resolve(id);
+    try {
+        Files.writeString(dir.resolve("lyrics.lrc"), lrc, StandardCharsets.UTF_8);
+        Files.deleteIfExists(dir.resolve("words.json")); // era da letra anterior
+    } catch (IOException e) {
+        throw new UncheckedIOException(e);
+    }
+
+    // 1) Aplica a letra (reseta offset e palavras, como antes).
+    Song afterLyrics = songs.computeIfPresent(id, (k, s) -> s.withFile("lyrics", "lyrics.lrc"));
+    if (afterLyrics == null) {
+        return Optional.empty();
+    }
+
+    // 2) Tenta medir o offset entre a primeira linha cantada e o início da voz.
+    int offset = detectOffsetSafe(dir, afterLyrics);
+    if (offset != 0) {
+        afterLyrics = songs.computeIfPresent(id, (k, s) -> s.withLyricsOffset(offset));
+        if (afterLyrics == null) {
             return Optional.empty();
         }
-        try {
-            Path dir = root.resolve(id);
-            Files.writeString(dir.resolve("lyrics.lrc"), lrc, StandardCharsets.UTF_8);
-            Files.deleteIfExists(dir.resolve("words.json")); // era da letra anterior
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
+    }
+
+    persist(afterLyrics);
+    return Optional.of(afterLyrics);
+}
+
+    /** Tenta detectar o offset; devolve 0 se não der ou se for desprezível. */
+    private int detectOffsetSafe(Path dir, Song song) {
+        String lead = song.files().get("lead");
+        if (lead == null) {
+            return 0; // separação ainda não terminou
         }
-        return update(id, s -> s.withFile("lyrics", "lyrics.lrc"));
+        try {
+            var info = separator.detectOffset(dir.resolve(lead), dir.resolve("lyrics.lrc"));
+            Object detected = info.get("detected");
+            Object value = info.get("offsetMs");
+            if (Boolean.TRUE.equals(detected) && value instanceof Number n) {
+                int ms = n.intValue();
+                // Abaixo de 100 ms é imperceptível; não mexe.
+                return Math.abs(ms) >= 100 ? ms : 0;
+            }
+        } catch (Exception e) {
+            log.warn("Não consegui detectar offset automático de {}: {}", song.id(), e.getMessage());
+        }
+        return 0;
     }
 
     public Optional<Song> attachCover(String id, byte[] bytes, String extension) {
@@ -203,10 +241,11 @@ public class SongService {
         Path words = dir.resolve("words.json");
         try {
             var lyricsStamp = Files.getLastModifiedTime(lrc);
-            separator.align(dir.resolve(song.files().get("lead")), lrc, words, language);
+            // novo: repassa o offset já detectado para essa música
+            separator.align(dir.resolve(song.files().get("lead")), lrc, words,
+                    language, song.lyricsOffsetMs());
 
             if (!Files.getLastModifiedTime(lrc).equals(lyricsStamp)) {
-                // a letra foi trocada durante o alinhamento: este resultado já nasceu velho
                 Files.deleteIfExists(words);
                 update(id, s -> s.withWordsState(null, null));
                 return;

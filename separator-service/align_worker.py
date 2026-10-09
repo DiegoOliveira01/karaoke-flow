@@ -47,6 +47,11 @@ def main() -> int:
     parser.add_argument("--output", required=True, help="Onde gravar o words.json")
     parser.add_argument("--language", default="pt", help="Idioma da letra (ISO 639-1)")
     parser.add_argument("--model", default="medium", help="Modelo do Whisper")
+    parser.add_argument(
+        "--offset-ms", type=int, default=0,
+        help="Deslocamento em ms entre o LRC e o início real da voz no áudio. "
+             "Positivo = voz começa depois do que o LRC indica."
+    )
     args = parser.parse_args()
 
     audio_path = Path(args.audio).resolve()
@@ -65,6 +70,15 @@ def main() -> int:
         print("[align_worker] a letra não tem nenhuma linha com texto", file=sys.stderr)
         return 3
 
+    # ---- Deslocamento aplicado ANTES do alinhamento ----
+    # O aligner usa line.t para achar o pedaço de áudio. Se o LRC está adiantado
+    # em relação à voz, somamos offset a cada line.t para que a janela caia em
+    # cima da voz real.
+    offset_s = args.offset_ms / 1000.0
+    if offset_s != 0:
+        for line in lines:
+            line.t += offset_s
+
     # Imports tardios: só o worker (que é descartável) paga o custo do torch.
     import whisper                    # instalado junto com o stable-ts
     import stable_whisper
@@ -77,6 +91,18 @@ def main() -> int:
         audio, len(audio) / SAMPLE_RATE, lines, _make_align_fn(model, args.language)
     )
 
+    # ---- Deslocamento desfeito DEPOIS do alinhamento ----
+    # Os tempos achados estão no referencial "audio real" (com o offset aplicado).
+    # Subtraímos para voltar ao referencial do LRC original, que é o que o
+    # frontend espera (ele aplica offsetMs por cima na hora de renderizar).
+    if offset_s != 0:
+        for r in results:
+            r["t"] -= offset_s
+            if r.get("aligned") and r.get("words"):
+                for w in r["words"]:
+                    w["s"] -= offset_s
+                    w["e"] -= offset_s
+
     payload = {
         "version": 1,
         "language": args.language,
@@ -84,12 +110,9 @@ def main() -> int:
         "lines": results,
     }
 
-    # troca atômica: o player nunca lê um arquivo pela metade
     tmp = output_path.with_suffix(".tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     tmp.replace(output_path)
-
-    # O processo termina aqui e o SO limpa tudo relacionado à GPU.
     return 0
 
 

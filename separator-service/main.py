@@ -172,6 +172,7 @@ class AlignRequest(BaseModel):
     lrc_path: str       # letra sincronizada por linha
     output_path: str    # words.json
     language: str = "pt"
+    offset_ms: int = 0  # deslocamento já detectado para essa música
 
 
 @app.post("/align")
@@ -194,6 +195,7 @@ def align(req: AlignRequest):
         "--output", str(req.output_path),
         "--language", req.language,
         "--model", ALIGN_MODEL,
+        "--offset-ms", str(req.offset_ms),
     ]
     print(
         f"[main] iniciando align_worker: model={ALIGN_MODEL} lang={req.language} "
@@ -225,3 +227,86 @@ def align(req: AlignRequest):
     except (OSError, ValueError) as e:
         raise HTTPException(500, f"words.json ilegível após o alinhamento: {e}") from e
     return {"lines": len(results), "aligned": aligned}
+
+class DetectOffsetRequest(BaseModel):
+    audio_path: str     # lead.flac
+    lrc_path: str       # lyrics.lrc
+
+
+def _detect_first_onset_ms(audio_path: Path) -> int:
+    """
+    Instante (ms) em que a voz começa a soar no arquivo.
+
+    Estratégia: RMS em janelas de 20 ms, limiar adaptativo a -35 dB do pico,
+    exigindo ~150 ms contínuos acima do limiar para valer como "voz começou".
+    Robusto para o lead.flac (que é só voz) e rápido (sem GPU).
+    """
+    import numpy as np
+    import whisper
+
+    audio = whisper.load_audio(str(audio_path))  # float32, 16 kHz, mono
+    if audio.size == 0:
+        return 0
+
+    sr = 16000
+    hop = int(sr * 0.02)   # 20 ms
+    win = hop * 2          # 40 ms por janela
+
+    n = (len(audio) - win) // hop + 1
+    if n <= 0:
+        return 0
+
+    idx = np.arange(win)[None, :] + hop * np.arange(n)[:, None]
+    frames = audio[idx]
+    rms = np.sqrt((frames ** 2).mean(axis=1) + 1e-12)
+
+    peak = float(rms.max())
+    if peak <= 1e-9:
+        return 0
+
+    threshold = peak * (10 ** (-35 / 20))  # -35 dB abaixo do pico
+    min_run = int(0.15 / 0.02)             # 150 ms acima do limiar = começou
+
+    run = 0
+    start = -1
+    for i, v in enumerate(rms):
+        if v >= threshold:
+            if run == 0:
+                start = i
+            run += 1
+            if run >= min_run:
+                return int(start * hop / sr * 1000)
+        else:
+            run = 0
+    return 0
+
+
+@app.post("/detect-offset")
+def detect_offset(req: DetectOffsetRequest):
+    audio_path, lrc_path = Path(req.audio_path), Path(req.lrc_path)
+    for p in (audio_path, lrc_path):
+        if not p.is_file():
+            raise HTTPException(404, f"Arquivo não encontrado: {p}")
+
+    lines = parse_lrc(lrc_path.read_text(encoding="utf-8"))
+    first_sung = next((l for l in lines if l.text), None)
+    if first_sung is None:
+        raise HTTPException(422, "A letra não tem nenhuma linha com texto")
+
+    try:
+        # Não usa GPU: não precisa do _lock.
+        onset_ms = _detect_first_onset_ms(audio_path)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"Falha ao analisar o áudio: {e}") from e
+
+    first_lyric_ms = int(first_sung.t * 1000)
+    offset_ms = onset_ms - first_lyric_ms
+
+    # Sanidade: se o desvio for maior que 30 s, é provavelmente outra versão
+    # (não um problema de intro). Não sugerimos nada para não quebrar a música.
+    if abs(offset_ms) > 30_000:
+        return {"detected": False, "offsetMs": 0,
+                "onsetMs": onset_ms, "firstLyricMs": first_lyric_ms}
+
+    return {"detected": True, "offsetMs": offset_ms,
+            "onsetMs": onset_ms, "firstLyricMs": first_lyric_ms}

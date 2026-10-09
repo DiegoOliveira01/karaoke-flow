@@ -47,22 +47,46 @@ public class SeparatorClient {
                 });
     }
 
+   /**
+   * Alinha a letra (LRC) com a voz isolada e grava o words.json em output.
+   * Bloqueia até terminar.
+   *
+   * offsetMs: deslocamento já detectado entre o LRC e o início real da voz
+   *           (o mesmo que está em Song.lyricsOffsetMs). O worker usa isso
+   *           para acertar a janela de áudio antes de alinhar.
+   */
+    public void align(Path audio, Path lrc, Path output, String language, int offsetMs) {
+       Map<String, Object> body = new java.util.LinkedHashMap<>();
+       body.put("audio_path", audio.toAbsolutePath().toString());
+       body.put("lrc_path", lrc.toAbsolutePath().toString());
+       body.put("output_path", output.toAbsolutePath().toString());
+       body.put("language", language);
+       body.put("offset_ms", offsetMs);
+
+       client.post()
+               .uri("/align")
+               .contentType(MediaType.APPLICATION_JSON)
+               .body(body)
+               .retrieve()
+               .toBodilessEntity();
+   }
+
     /**
-     * Alinha a letra (LRC) com a voz isolada e grava o words.json em output.
-     * Bloqueia até terminar.
-     */
-    public void align(Path audio, Path lrc, Path output, String language) {
+    * Pede ao serviço Python o deslocamento sugerido entre o início da voz no
+    * lead.flac e a primeira linha da letra. Devolve um Map com "detected" e
+    * "offsetMs" (além de "onsetMs"/"firstLyricMs" para diagnóstico).
+    */
+    public Map<String, Object> detectOffset(Path audio, Path lrc) {
         Map<String, String> body = Map.of(
                 "audio_path", audio.toAbsolutePath().toString(),
-                "lrc_path", lrc.toAbsolutePath().toString(),
-                "output_path", output.toAbsolutePath().toString(),
-                "language", language);
+                "lrc_path", lrc.toAbsolutePath().toString());
 
-        client.post()
-                .uri("/align")
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .toBodilessEntity();
-    }
+    return client.post()
+            .uri("/detect-offset")
+            .contentType(MediaType.APPLICATION_JSON)
+            .body(body)
+            .retrieve()
+            .body(new ParameterizedTypeReference<Map<String, Object>>() {
+            });
+   }
 }
