@@ -10,10 +10,11 @@ São duas passadas, como no vídeo do Funky:
   1) STEM_MODEL      separa voz x instrumental
   2) KARAOKE_MODEL   separa a voz em principal x backing
 
-Cada passada roda em um SUBPROCESSO Python isolado (worker.py). Quando o
-processo termina, o SO limpa toda a VRAM e o estado do ROCm/HIP associado
-a ele — sem isso, no Windows o ROCm acumula fragmentação entre trocas de
-modelo e a separação degrada para ~17 s/it depois de algumas músicas.
+Tanto a separação quanto o alinhamento palavra a palavra rodam em SUBPROCESSOS
+Python isolados (worker.py e align_worker.py). Quando cada processo termina, o
+SO limpa toda a VRAM e o estado do ROCm/HIP associado a ele — sem isso, no
+Windows o ROCm acumula fragmentação (separação cai para ~17 s/it) e o Whisper
+fica residente na VRAM indefinidamente.
 
 Os nomes dos modelos são configuráveis por variável de ambiente.
 Para ver os disponíveis:  audio-separator --list_models
@@ -29,7 +30,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from aligner import SAMPLE_RATE, align_lines, parse_lrc
+from aligner import parse_lrc
 
 STEM_MODEL = os.getenv("STEM_MODEL", "model_bs_roformer_ep_317_sdr_12.9755.ckpt")
 KARAOKE_MODEL = os.getenv(
@@ -37,15 +38,16 @@ KARAOKE_MODEL = os.getenv(
 )
 OUTPUT_FORMAT = os.getenv("OUTPUT_FORMAT", "FLAC")
 # Modelo do Whisper usado só para alinhar palavras ("base" é mais leve; "small" erra menos).
-ALIGN_MODEL = os.getenv("ALIGN_MODEL", "small")
+ALIGN_MODEL = os.getenv("ALIGN_MODEL", "medium")
 SCRATCH_DIR = Path(os.getenv("SCRATCH_DIR", "./scratch")).resolve()
 
-# Caminho absoluto do worker.py, ao lado deste main.py.
+# Caminho absoluto dos workers, ao lado deste main.py.
 _WORKER = Path(__file__).resolve().parent / "worker.py"
+_ALIGN_WORKER = Path(__file__).resolve().parent / "align_worker.py"
 
 app = FastAPI(title="Karaoke separator")
 
-# Uma GPU só: serializa as separações.
+# Uma GPU só: serializa separações e alinhamentos entre si.
 _lock = threading.Lock()
 
 
@@ -69,8 +71,7 @@ def _run_pass(model_name: str, input_file: Path, out_dir: Path) -> tuple[Path, P
     Executa UMA passada de separação em um subprocesso isolado.
 
     O worker herda stdout/stderr do uvicorn, então o progresso do audio-separator
-    (barras, "Loading model", "Separation duration") aparece no mesmo console —
-    exatamente como aparecia antes, quando rodávamos in-process.
+    (barras, "Loading model", "Separation duration") aparece no mesmo console.
 
     Como cada passada tem sua própria sessão ROCm, ao final ela devolve 100% da
     VRAM ao driver — que é o que evita a degradação entre músicas.
@@ -109,12 +110,13 @@ def _run_pass(model_name: str, input_file: Path, out_dir: Path) -> tuple[Path, P
 @app.get("/health")
 def health():
     # Este processo NÃO abre sessão CUDA/HIP: toda a GPU fica nos subprocessos.
-    # Por isso não reportamos uso de GPU aqui — o log do worker mostra tudo.
     return {
         "status": "ok",
         "stem_model": STEM_MODEL,
         "karaoke_model": KARAOKE_MODEL,
+        "align_model": ALIGN_MODEL,
         "worker": str(_WORKER),
+        "align_worker": str(_ALIGN_WORKER),
     }
 
 
@@ -160,43 +162,16 @@ def separate(req: SeparateRequest):
 # --------------------------------------------------------------------------
 # Alinhamento palavra a palavra (stable-ts + LRC como mapa de janelas)
 #
-# Observação: o /align ainda roda no processo principal. Ele carrega o Whisper
-# e cria uma sessão CUDA/HIP no main. Como o /separate roda em subprocessos,
-# essa sessão do main não interfere — mas evite rodar /align e /separate ao
-# mesmo tempo. O _lock já serializa os dois.
+# Roda em SUBPROCESSO isolado (align_worker.py), igual à separação. O Whisper
+# fica residente em VRAM apenas durante o alinhamento; ao final, o processo
+# morre e o SO devolve tudo ao driver. Sem isso, com "medium" você teria
+# ~3 GB de VRAM presos durante toda a vida do uvicorn.
 # --------------------------------------------------------------------------
-_align_models: dict = {}
-
-
 class AlignRequest(BaseModel):
     audio_path: str     # voz isolada (lead.flac)
     lrc_path: str       # letra sincronizada por linha
     output_path: str    # words.json
     language: str = "pt"
-
-
-def _get_align_model():
-    if ALIGN_MODEL not in _align_models:
-        import stable_whisper  # import tardio: só quem usa palavras paga o custo
-        import torch
-
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        _align_models[ALIGN_MODEL] = stable_whisper.load_model(ALIGN_MODEL, device=device)
-    return _align_models[ALIGN_MODEL]
-
-
-def _make_align_fn(model, language: str):
-    def align_fn(chunk, text):
-        try:
-            # cantores seguram notas por vários segundos; o padrão (3 s) encurtaria a palavra
-            result = model.align(chunk, text, language=language, max_word_dur=10.0)
-        except TypeError:  # versão do stable-ts sem esse parâmetro
-            result = model.align(chunk, text, language=language)
-        if result is None:
-            return None
-        return [(w.start, w.end) for seg in result.segments for w in seg.words]
-
-    return align_fn
 
 
 @app.post("/align")
@@ -206,35 +181,47 @@ def align(req: AlignRequest):
         if not p.is_file():
             raise HTTPException(404, f"Arquivo não encontrado: {p}")
 
+    # Validação barata aqui no main, antes de gastar um subprocesso com input inválido.
     lines = parse_lrc(lrc_path.read_text(encoding="utf-8"))
     if not any(line.text for line in lines):
         raise HTTPException(422, "A letra não tem nenhuma linha com texto")
 
+    cmd = [
+        sys.executable,
+        str(_ALIGN_WORKER),
+        "--audio", str(audio_path),
+        "--lrc", str(lrc_path),
+        "--output", str(req.output_path),
+        "--language", req.language,
+        "--model", ALIGN_MODEL,
+    ]
+    print(
+        f"[main] iniciando align_worker: model={ALIGN_MODEL} lang={req.language} "
+        f"audio={audio_path.name}",
+        flush=True,
+    )
     try:
         with _lock:  # a GPU é uma só: não roda junto com a separação
-            import whisper  # instalado junto com o stable-ts
-
-            audio = whisper.load_audio(str(audio_path))  # float32, 16 kHz, mono
-            model = _get_align_model()
-            results = align_lines(
-                audio, len(audio) / SAMPLE_RATE, lines, _make_align_fn(model, req.language)
+            # Sem capture: o worker fala direto no console do uvicorn (barras VAD/Align).
+            result = subprocess.run(cmd)
+        if result.returncode != 0:
+            raise HTTPException(
+                500,
+                f"Falha no alinhamento (align_worker código {result.returncode}). "
+                f"Veja a saída acima do align_worker para o motivo.",
             )
-            try:
-                import torch
-
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            except ImportError:
-                pass
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(500, f"Falha no alinhamento: {e}") from e
+    print("[main] align_worker terminou", flush=True)
 
-    aligned = sum(1 for r in results if r["aligned"])
-    payload = {"version": 1, "language": req.language, "model": ALIGN_MODEL, "lines": results}
+    # Conta o resultado lendo o words.json que o worker acabou de escrever.
     out = Path(req.output_path)
-    tmp = out.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(out)  # troca atômica: o player nunca lê um arquivo pela metade
+    try:
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        results = payload.get("lines", [])
+        aligned = sum(1 for r in results if r.get("aligned"))
+    except (OSError, ValueError) as e:
+        raise HTTPException(500, f"words.json ilegível após o alinhamento: {e}") from e
     return {"lines": len(results), "aligned": aligned}
