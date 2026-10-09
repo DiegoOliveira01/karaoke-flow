@@ -357,6 +357,9 @@ addInput.addEventListener("change", onAddFilesChosen);
 function openAddDialog(files) {
   $("add-form").reset();
   setStatus("add-status", "");
+  setStatus("url-status", "");          
+  $("add-url-input").value = "";         
+  $("add-url-btn").disabled = false; 
   onAddFilesChosen();
   if (!$("dlg-add").open) $("dlg-add").showModal();
   if (files && files.length) setAddFiles(files);
@@ -403,6 +406,36 @@ $("add-form").addEventListener("submit", async (ev) => {
     if (sent) refresh();
   }
 });
+
+/* ---------- baixar do YouTube ---------- */
+$("add-url-btn").addEventListener("click", downloadFromUrl);
+
+$("add-url-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault(); // não submete o add-form
+    downloadFromUrl();
+  }
+});
+
+async function downloadFromUrl() {
+  const value = $("add-url-input").value.trim();
+  if (!value) return;
+  $("add-url-btn").disabled = true;
+  setStatus("url-status", "Baixando do YouTube… pode levar até 1 minuto.");
+  try {
+    const song = await api(`${API}/from-url`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: value }),
+    });
+    $("dlg-add").close();
+    toast(`“${song.title}” baixada. Separando as vozes…`);
+    refresh();
+  } catch (e) {
+    setStatus("url-status", e.message || "Não foi possível baixar.", true);
+    $("add-url-btn").disabled = false;
+  }
+}
 
 /* ---------- ligações da biblioteca ---------- */
 function syncViewButtons() {

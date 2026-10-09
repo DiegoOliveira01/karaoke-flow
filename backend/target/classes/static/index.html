@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="dark">
 <title>Karaokê</title>
 <link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
 </head>
 <body>
 
@@ -91,6 +92,16 @@
     <button class="btn" type="submit" id="add-btn" disabled>Separar vozes</button>
     <div class="status" id="add-status" role="status"></div>
   </form>
+  <div class="or-sep" role="separator"><span>ou</span></div>
+
+  <div class="add-url">
+    <input type="text" id="add-url-input"
+           placeholder="URL do YouTube ou nome da música (ex.: Mike Oldfield - Nuclear)"
+           autocomplete="off">
+    <button class="btn" type="button" id="add-url-btn">Baixar</button>
+  </div>
+  <p class="hint">Se digitar só o nome, baixa o primeiro resultado do YouTube.</p>
+  <div class="status" id="url-status" role="status"></div>
 </dialog>
 
 <!-- ===== diálogo: escolher letra ===== -->

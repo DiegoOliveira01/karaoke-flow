@@ -545,3 +545,7 @@ kbd {
 .topbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .qr svg { width: 240px; height: 240px; display: block; margin: 1rem auto; }
 .share-url { text-align: center; font-family: monospace; word-break: break-all; color: var(--muted); }
+
+/* ---------- adicionar por URL ---------- */
+.add-url { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+@media (max-width: 560px) { .add-url { grid-template-columns: 1fr; } }

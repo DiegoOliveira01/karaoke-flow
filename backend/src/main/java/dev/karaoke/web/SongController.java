@@ -1,6 +1,7 @@
 package dev.karaoke.web;
 
 import java.util.List;
+import java.io.UncheckedIOException;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -45,6 +46,9 @@ public class SongController {
         this.service = service;
         this.lrclib = lrclib;
         this.itunes = itunes;
+    }
+
+    public record UrlRequest(String url) {
     }
 
     @GetMapping
@@ -144,5 +148,17 @@ public class SongController {
 
     private static ResponseStatusException notFound() {
         return new ResponseStatusException(HttpStatus.NOT_FOUND, "Música não encontrada");
+    }
+
+    @PostMapping("/from-url")
+    public ResponseEntity<Song> uploadFromUrl(@RequestBody UrlRequest body) {
+        if (body.url() == null || body.url().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Informe uma URL ou termo de busca");
+        }
+        try {
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.createFromUrl(body.url().trim()));
+        } catch (UncheckedIOException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
+        }
     }
 }

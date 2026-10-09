@@ -8,10 +8,13 @@ dev\karaoke\web\ServerInfoController.class
 dev\karaoke\model\WordsFile$Line.class
 dev\karaoke\service\ItunesClient$Image.class
 dev\karaoke\web\SongController$CoverChoice.class
+dev\karaoke\service\YtDlpClient.class
 dev\karaoke\web\SongController$LyricsChoice.class
+dev\karaoke\service\YtDlpClient$Metadata.class
 dev\karaoke\config\KaraokeProperties$Itunes.class
 dev\karaoke\web\ServerInfoController$ServerInfo.class
 dev\karaoke\web\SearchController.class
 dev\karaoke\service\ItunesClient$CoverResult.class
 dev\karaoke\service\ItunesClient.class
+dev\karaoke\web\SongController$UrlRequest.class
 dev\karaoke\web\SongController$OffsetBody.class

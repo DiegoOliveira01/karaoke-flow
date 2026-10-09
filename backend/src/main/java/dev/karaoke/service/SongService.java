@@ -41,6 +41,8 @@ public class SongService {
     private static final Logger log = LoggerFactory.getLogger(SongService.class);
     private static final String META = "meta.json";
 
+    private final YtDlpClient ytdlp;
+
     private final Path root;
     private final SeparatorClient separator;
     private final ObjectMapper mapper = new ObjectMapper()
@@ -54,10 +56,12 @@ public class SongService {
     // A GPU é o gargalo: uma música por vez.
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
 
-    public SongService(KaraokeProperties props, SeparatorClient separator) {
+    public SongService(KaraokeProperties props, SeparatorClient separator, YtDlpClient ytdlp) {
         this.root = props.storageDir().toAbsolutePath().normalize();
         this.separator = separator;
+        this.ytdlp = ytdlp;
     }
+
 
     @PostConstruct
     void loadFromDisk() throws IOException {
@@ -119,6 +123,60 @@ public class SongService {
         enqueue(song);
         return song;
     }
+
+    /**
+    * Baixa o áudio de uma URL do YouTube (ou do primeiro resultado de uma busca)
+    * e enfileira a música para separação.
+    *
+    * O arquivo baixado vira "original.mp3" dentro da pasta da música, que é o
+    * mesmo nome que o upload multipart produz — então o resto do pipeline
+    * (findOriginal, separator, etc.) não precisa saber que a origem foi o yt-dlp.
+    */
+    public Song createFromUrl(String urlOrQuery) {
+        String id = UUID.randomUUID().toString();
+        Path dir = root.resolve(id);
+        try {
+            Files.createDirectories(dir);
+
+            // 1) Consulta metadados (título / uploader) sem baixar o arquivo inteiro.
+            YtDlpClient.Metadata meta = ytdlp.probe(urlOrQuery);
+
+            // 2) Baixa o áudio como original.mp3.
+            ytdlp.download(urlOrQuery, dir.resolve("original"));
+
+            // 3) Confere que o arquivo existe mesmo.
+            Path audio;
+            try (Stream<Path> files = Files.list(dir)) {
+                audio = files
+                        .filter(p -> p.getFileName().toString().startsWith("original."))
+                        .findFirst()
+                        .orElse(null);
+            }
+            if (audio == null) {
+                throw new IOException("yt-dlp não gerou nenhum arquivo de áudio em " + dir);
+            }
+
+            String cleanTitle = (meta.title() == null || meta.title().isBlank())
+                    ? "Música " + id.substring(0, 8)
+                    : meta.title().trim();
+            String cleanArtist = meta.artist() == null ? "" : meta.artist().trim();
+
+            Song song = Song.queued(id, cleanTitle, cleanArtist);
+            persist(song);
+            enqueue(song);
+            return song;
+        } catch (Exception e) {
+            // Falhou: apaga a pasta meio-feita para não deixar lixo.
+            try (Stream<Path> walk = Files.walk(dir)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+            } catch (IOException ignored) {
+                 // já estamos em erro; não vale a pena propagar esse segundo problema
+            }
+            throw new UncheckedIOException(new IOException(
+                    "Falha ao baixar do YouTube: " + e.getMessage(), e));
+        }
+    }
+
 
     public boolean delete(String id) {
         Song removed = songs.remove(id);
@@ -410,4 +468,6 @@ public class SongService {
         int dot = filename.lastIndexOf('.');
         return dot > 0 ? filename.substring(0, dot) : filename;
     }
+
+    
 }

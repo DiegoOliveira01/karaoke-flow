@@ -42,16 +42,16 @@ public class GuestRestrictionFilter extends OncePerRequestFilter {
     private static boolean isAllowedForGuest(HttpServletRequest req) {
         String m = req.getMethod();
         String p = req.getRequestURI();
-        // normaliza barra final: "/api/songs/" -> "/api/songs"
         if (p.length() > 1 && p.endsWith("/")) {
             p = p.substring(0, p.length() - 1);
         }
         if ("GET".equals(m) || "HEAD".equals(m) || "OPTIONS".equals(m)) {
-            return true;   // leitura liberada (catálogo, mídia, buscas)
+            return true; // leitura liberada
         }
-        if ("POST".equals(m) && "/api/songs".equals(p)) {
-            return true;   // adicionar música liberado
+        // adicionar música (upload de arquivo OU download do YouTube) é liberado
+        if ("POST".equals(m) && ("/api/songs".equals(p) || "/api/songs/from-url".equals(p))) {
+            return true;
         }
-        return false;      // todo o resto: negado
+        return false;
     }
 }
