@@ -1,4 +1,4 @@
-# 🎤 Karaokê
+# 🎤 Karaokê-Flow
 
 ![Java](https://img.shields.io/badge/Java-21-orange)
 ![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.3.5-green)
@@ -7,6 +7,8 @@
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 Sistema de karaokê caseiro que **baixa músicas do YouTube**, **separa as vozes automaticamente** com IA, **sincroniza letras palavra a palavra** e **roda em qualquer aparelho da rede** via QR code.
+
+![Tela Principal](docs/main.png)
 
 ---
 
@@ -64,15 +66,15 @@ Sistema de karaokê caseiro que **baixa músicas do YouTube**, **separa as vozes
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                    Rede local                        │
-│                                                      │
+│                    Rede local                       │
+│                                                     │
 │  ┌──────────┐    ┌──────────────────┐    ┌────────┐ │
 │  │  Host PC │    │   Celular        │    │ Tablet │ │
 │  │ (admin)  │    │   (convidado)    │    │(convid)│ │
 │  └────┬─────┘    └────────┬─────────┘    └───┬────┘ │
 │       │  HTTP :8080       │                  │      │
 │       └──────────┬────────┴──────────────────┘      │
-│                  ▼                                   │
+│                  ▼                                  │
 │  ┌──────────────────────────────────────────────┐   │
 │  │  Spring Boot (backend)                       │   │
 │  │  ─────────────────────────────────────────   │   │
@@ -81,8 +83,8 @@ Sistema de karaokê caseiro que **baixa músicas do YouTube**, **separa as vozes
 │  │  • Cliente LRCLIB, iTunes, yt-dlp            │   │
 │  │  • Filtro de convidado (IP)                  │   │
 │  └──────────────┬───────────────────────────────┘   │
-│                 │  HTTP :8001                        │
-│                 ▼                                    │
+│                 │  HTTP :8001                       │
+│                 ▼                                   │
 │  ┌──────────────────────────────────────────────┐   │
 │  │  FastAPI (separator-service)                 │   │
 │  │  ─────────────────────────────────────────   │   │
@@ -91,8 +93,8 @@ Sistema de karaokê caseiro que **baixa músicas do YouTube**, **separa as vozes
 │  │  • /detect-offset → RMS onset detection      │   │
 │  │  • Cada job roda em subprocesso isolado      │   │
 │  └──────────────┬───────────────────────────────┘   │
-│                 │                                    │
-│                 ▼                                    │
+│                 │                                   │
+│                 ▼                                   │
 │  ┌──────────────────────────────────────────────┐   │
 │  │  GPU (ROCm / CUDA)                           │   │
 │  │  Roformer + Whisper                          │   │
@@ -391,7 +393,7 @@ karaoke:
   storage-dir: ./data/songs            # onde as músicas ficam
   separator:
     url: http://localhost:8001          # URL do serviço Python
-    read-timeout: 30m                   # timeout HTTP (separação pode demorar)
+    read-timeout: 90m                   # timeout HTTP (separação pode demorar)
   ytdlp:
     path: yt-dlp                        # caminho do executável
     cookies: C:/caminho/cookies.txt     # cookies do YouTube
